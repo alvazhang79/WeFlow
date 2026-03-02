@@ -848,6 +848,26 @@ function ChatPage(_props: ChatPageProps) {
     setIsLoadingDetail(true)
     setIsLoadingDetailExtra(true)
 
+    if (normalizedSessionId.includes('@chatroom')) {
+      void (async () => {
+        try {
+          const hintResult = await window.electronAPI.chat.getGroupMyMessageCountHint(normalizedSessionId)
+          if (requestSeq !== detailRequestSeqRef.current) return
+          if (!hintResult.success || !Number.isFinite(hintResult.count)) return
+          const hintedMyCount = Math.max(0, Math.floor(hintResult.count as number))
+          setSessionDetail((prev) => {
+            if (!prev || prev.wxid !== normalizedSessionId) return prev
+            return {
+              ...prev,
+              groupMyMessages: hintedMyCount
+            }
+          })
+        } catch {
+          // ignore hint errors
+        }
+      })()
+    }
+
     try {
       const result = await window.electronAPI.chat.getSessionDetailFast(normalizedSessionId)
       if (requestSeq !== detailRequestSeqRef.current) return
@@ -1074,6 +1094,57 @@ function ChatPage(_props: ChatPageProps) {
       })
   }, [])
 
+  const normalizeWxidLikeIdentity = useCallback((value?: string): string => {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return ''
+    const lowered = trimmed.toLowerCase()
+    if (lowered.startsWith('wxid_')) {
+      const matched = lowered.match(/^(wxid_[^_]+)/i)
+      return matched ? matched[1].toLowerCase() : lowered
+    }
+    const suffixMatch = lowered.match(/^(.+)_([a-z0-9]{4})$/i)
+    return suffixMatch ? suffixMatch[1].toLowerCase() : lowered
+  }, [])
+
+  const isSelfGroupMember = useCallback((memberUsername?: string): boolean => {
+    const selfRaw = String(myWxid || '').trim().toLowerCase()
+    const selfNormalized = normalizeWxidLikeIdentity(myWxid)
+    if (!selfRaw && !selfNormalized) return false
+    const memberRaw = String(memberUsername || '').trim().toLowerCase()
+    const memberNormalized = normalizeWxidLikeIdentity(memberUsername)
+    return Boolean(
+      (selfRaw && memberRaw && selfRaw === memberRaw) ||
+      (selfNormalized && memberNormalized && selfNormalized === memberNormalized)
+    )
+  }, [myWxid, normalizeWxidLikeIdentity])
+
+  const resolveMyGroupMessageCountFromMembers = useCallback((members: GroupPanelMember[]): number | undefined => {
+    if (!myWxid) return undefined
+
+    for (const member of members) {
+      if (!isSelfGroupMember(member.username)) continue
+      if (Number.isFinite(member.messageCount)) {
+        return Math.max(0, Math.floor(member.messageCount))
+      }
+      return 0
+    }
+
+    return undefined
+  }, [isSelfGroupMember, myWxid])
+
+  const syncGroupMyMessagesFromMembers = useCallback((chatroomId: string, members: GroupPanelMember[]) => {
+    const myMessageCount = resolveMyGroupMessageCountFromMembers(members)
+    if (!Number.isFinite(myMessageCount)) return
+
+    setSessionDetail((prev) => {
+      if (!prev || prev.wxid !== chatroomId || !prev.wxid.includes('@chatroom')) return prev
+      return {
+        ...prev,
+        groupMyMessages: myMessageCount as number
+      }
+    })
+  }, [resolveMyGroupMessageCountFromMembers])
+
   const updateGroupMembersPanelCache = useCallback((
     chatroomId: string,
     members: GroupPanelMember[],
@@ -1092,6 +1163,47 @@ function ChatPage(_props: ChatPageProps) {
       }
     }
   }, [])
+
+  const syncGroupMembersMyCountFromDetail = useCallback((chatroomId: string, myMessageCount: number) => {
+    if (!chatroomId || !chatroomId.includes('@chatroom')) return
+    const normalizedCount = Number.isFinite(myMessageCount) ? Math.max(0, Math.floor(myMessageCount)) : 0
+
+    const patchMembers = (members: GroupPanelMember[]): { changed: boolean; members: GroupPanelMember[] } => {
+      if (!Array.isArray(members) || members.length === 0) {
+        return { changed: false, members }
+      }
+      let changed = false
+      const patched = members.map((member) => {
+        if (!isSelfGroupMember(member.username)) return member
+        if (member.messageCount === normalizedCount) return member
+        changed = true
+        return {
+          ...member,
+          messageCount: normalizedCount
+        }
+      })
+      if (!changed) return { changed: false, members }
+      return { changed: true, members: normalizeGroupPanelMembers(patched) }
+    }
+
+    const cached = groupMembersPanelCacheRef.current.get(chatroomId)
+    if (cached && cached.members.length > 0) {
+      const patchedCache = patchMembers(cached.members)
+      if (patchedCache.changed) {
+        updateGroupMembersPanelCache(chatroomId, patchedCache.members, true)
+      }
+    }
+
+    setGroupPanelMembers((prev) => {
+      const patched = patchMembers(prev)
+      if (!patched.changed) return prev
+      return patched.members
+    })
+  }, [
+    isSelfGroupMember,
+    normalizeGroupPanelMembers,
+    updateGroupMembersPanelCache
+  ])
 
   const getGroupMembersPanelDataWithTimeout = useCallback(async (
     chatroomId: string,
@@ -1145,6 +1257,7 @@ function ChatPage(_props: ChatPageProps) {
 
           const membersWithCounts = normalizeGroupPanelMembers(countsResult.data as GroupPanelMember[])
           setGroupPanelMembers(membersWithCounts)
+          syncGroupMyMessagesFromMembers(chatroomId, membersWithCounts)
           setGroupMembersError(null)
           updateGroupMembersPanelCache(chatroomId, membersWithCounts, true)
           hasInitializedGroupMembersRef.current = true
@@ -1161,6 +1274,9 @@ function ChatPage(_props: ChatPageProps) {
 
     if (cacheFresh && cached) {
       setGroupPanelMembers(cached.members)
+      if (cached.includeMessageCounts) {
+        syncGroupMyMessagesFromMembers(chatroomId, cached.members)
+      }
       setGroupMembersError(null)
       setGroupMembersLoadingHint('')
       setIsLoadingGroupMembers(false)
@@ -1176,6 +1292,9 @@ function ChatPage(_props: ChatPageProps) {
     setGroupMembersError(null)
     if (hasCachedMembers && cached) {
       setGroupPanelMembers(cached.members)
+      if (cached.includeMessageCounts) {
+        syncGroupMyMessagesFromMembers(chatroomId, cached.members)
+      }
       setIsRefreshingGroupMembers(true)
       setGroupMembersLoadingHint('')
       setIsLoadingGroupMembers(false)
@@ -1230,6 +1349,7 @@ function ChatPage(_props: ChatPageProps) {
   }, [
     getGroupMembersPanelDataWithTimeout,
     isGroupChatSession,
+    syncGroupMyMessagesFromMembers,
     normalizeGroupPanelMembers,
     updateGroupMembersPanelCache
   ])
@@ -1266,6 +1386,13 @@ function ChatPage(_props: ChatPageProps) {
     setGroupMemberSearchKeyword('')
     void loadGroupMembersPanel(currentSessionId)
   }, [showGroupMembersPanel, currentSessionId, loadGroupMembersPanel, isGroupChatSession])
+
+  useEffect(() => {
+    const chatroomId = String(sessionDetail?.wxid || '').trim()
+    if (!chatroomId || !chatroomId.includes('@chatroom')) return
+    if (!Number.isFinite(sessionDetail?.groupMyMessages)) return
+    syncGroupMembersMyCountFromDetail(chatroomId, sessionDetail!.groupMyMessages as number)
+  }, [sessionDetail?.groupMyMessages, sessionDetail?.wxid, syncGroupMembersMyCountFromDetail])
 
   // 复制字段值到剪贴板
   const handleCopyField = useCallback(async (text: string, field: string) => {

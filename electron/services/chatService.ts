@@ -13,6 +13,7 @@ import { wcdbService } from './wcdbService'
 import { MessageCacheService } from './messageCacheService'
 import { ContactCacheService, ContactCacheEntry } from './contactCacheService'
 import { SessionStatsCacheService, SessionStatsCacheEntry, SessionStatsCacheStats } from './sessionStatsCacheService'
+import { GroupMyMessageCountCacheService, GroupMyMessageCountCacheEntry } from './groupMyMessageCountCacheService'
 import {
   ExportContentScopeStatsEntry,
   ExportContentSessionStatsEntry,
@@ -226,6 +227,7 @@ class ChatService {
   private readonly contactCacheService: ContactCacheService
   private readonly messageCacheService: MessageCacheService
   private readonly sessionStatsCacheService: SessionStatsCacheService
+  private readonly groupMyMessageCountCacheService: GroupMyMessageCountCacheService
   private readonly exportContentStatsCacheService: ExportContentStatsCacheService
   private voiceWavCache: LRUCache<string, Buffer>
   private voiceTranscriptCache: LRUCache<string, string>
@@ -265,6 +267,8 @@ class ChatService {
   private allGroupSessionIdsCache: { ids: string[]; updatedAt: number } | null = null
   private readonly sessionStatsCacheTtlMs = 10 * 60 * 1000
   private readonly allGroupSessionIdsCacheTtlMs = 5 * 60 * 1000
+  private groupMyMessageCountCacheScope = ''
+  private groupMyMessageCountMemoryCache = new Map<string, GroupMyMessageCountCacheEntry>()
   private exportContentStatsScope = ''
   private exportContentStatsMemory = new Map<string, ExportContentSessionStatsEntry>()
   private exportContentStatsScopeUpdatedAt = 0
@@ -282,6 +286,7 @@ class ChatService {
     this.avatarCache = new Map(Object.entries(persisted))
     this.messageCacheService = new MessageCacheService(this.configService.getCacheBasePath())
     this.sessionStatsCacheService = new SessionStatsCacheService(this.configService.getCacheBasePath())
+    this.groupMyMessageCountCacheService = new GroupMyMessageCountCacheService(this.configService.getCacheBasePath())
     this.exportContentStatsCacheService = new ExportContentStatsCacheService(this.configService.getCacheBasePath())
     // 初始化LRU缓存，限制大小防止内存泄漏
     this.voiceWavCache = new LRUCache(this.voiceWavCacheMaxEntries)
@@ -901,7 +906,10 @@ class ChatService {
   /**
    * 批量获取会话消息总数（轻量接口，用于列表优先排序）
    */
-  async getSessionMessageCounts(sessionIds: string[]): Promise<{
+  async getSessionMessageCounts(
+    sessionIds: string[],
+    options?: { preferHintCache?: boolean; bypassSessionCache?: boolean }
+  ): Promise<{
     success: boolean
     counts?: Record<string, number>
     error?: string
@@ -923,28 +931,36 @@ class ChatService {
         return { success: true, counts: {} }
       }
 
+      const preferHintCache = options?.preferHintCache !== false
+      const bypassSessionCache = options?.bypassSessionCache === true
+
       this.refreshSessionMessageCountCacheScope()
       const counts: Record<string, number> = {}
       const now = Date.now()
       const pendingSessionIds: string[] = []
 
       for (const sessionId of normalizedSessionIds) {
-        const cached = this.sessionMessageCountCache.get(sessionId)
-        if (cached && now - cached.updatedAt <= this.sessionMessageCountCacheTtlMs) {
-          counts[sessionId] = cached.count
-          continue
+        if (!bypassSessionCache) {
+          const cached = this.sessionMessageCountCache.get(sessionId)
+          if (cached && now - cached.updatedAt <= this.sessionMessageCountCacheTtlMs) {
+            counts[sessionId] = cached.count
+            continue
+          }
         }
 
-        const hintCount = this.sessionMessageCountHintCache.get(sessionId)
-        if (typeof hintCount === 'number' && Number.isFinite(hintCount) && hintCount >= 0) {
-          counts[sessionId] = Math.floor(hintCount)
-          this.sessionMessageCountCache.set(sessionId, {
-            count: Math.floor(hintCount),
-            updatedAt: now
-          })
-        } else {
-          pendingSessionIds.push(sessionId)
+        if (preferHintCache) {
+          const hintCount = this.sessionMessageCountHintCache.get(sessionId)
+          if (typeof hintCount === 'number' && Number.isFinite(hintCount) && hintCount >= 0) {
+            counts[sessionId] = Math.floor(hintCount)
+            this.sessionMessageCountCache.set(sessionId, {
+              count: Math.floor(hintCount),
+              updatedAt: now
+            })
+            continue
+          }
         }
+
+        pendingSessionIds.push(sessionId)
       }
 
       const batchSize = 320
@@ -1618,6 +1634,7 @@ class ChatService {
     const scope = `${dbPath}::${myWxid}`
     if (scope === this.sessionMessageCountCacheScope) {
       this.refreshSessionStatsCacheScope(scope)
+      this.refreshGroupMyMessageCountCacheScope(scope)
       this.refreshExportContentStatsScope(scope)
       return
     }
@@ -1628,7 +1645,14 @@ class ChatService {
     this.sessionDetailExtraCache.clear()
     this.sessionStatusCache.clear()
     this.refreshSessionStatsCacheScope(scope)
+    this.refreshGroupMyMessageCountCacheScope(scope)
     this.refreshExportContentStatsScope(scope)
+  }
+
+  private refreshGroupMyMessageCountCacheScope(scope: string): void {
+    if (scope === this.groupMyMessageCountCacheScope) return
+    this.groupMyMessageCountCacheScope = scope
+    this.groupMyMessageCountMemoryCache.clear()
   }
 
   private refreshExportContentStatsScope(scope: string): void {
@@ -1718,7 +1742,7 @@ class ChatService {
       return {
         ...entry,
         updatedAt: Date.now(),
-        mediaReady: true
+        mediaReady: false
       }
     }
 
@@ -1783,9 +1807,18 @@ class ChatService {
 
       if (targets.length > 0) {
         await this.forEachWithConcurrency(targets, 3, async (sessionId) => {
-          const nextEntry = await this.collectExportContentEntry(sessionId)
-          this.exportContentStatsMemory.set(sessionId, nextEntry)
-          this.exportContentStatsDirtySessionIds.delete(sessionId)
+          try {
+            const nextEntry = await this.collectExportContentEntry(sessionId)
+            this.exportContentStatsMemory.set(sessionId, nextEntry)
+            if (nextEntry.mediaReady) {
+              this.exportContentStatsDirtySessionIds.delete(sessionId)
+            } else {
+              this.exportContentStatsDirtySessionIds.add(sessionId)
+            }
+          } catch (error) {
+            console.error('ChatService: 刷新导出内容会话统计失败:', sessionId, error)
+            this.exportContentStatsDirtySessionIds.add(sessionId)
+          }
         })
       }
 
@@ -1850,7 +1883,7 @@ class ChatService {
         if (entry) {
           if (entry.hasAny) {
             textSessions += 1
-          } else if (this.isExportContentEntryDirty(sessionId)) {
+          } else if (forceRefresh || this.isExportContentEntryDirty(sessionId)) {
             missingTextCountSessionIds.push(sessionId)
           }
         } else {
@@ -1873,7 +1906,10 @@ class ChatService {
       }
 
       if (missingTextCountSessionIds.length > 0) {
-        const textCountResult = await this.getSessionMessageCounts(missingTextCountSessionIds)
+        const textCountResult = await this.getSessionMessageCounts(missingTextCountSessionIds, {
+          preferHintCache: false,
+          bypassSessionCache: true
+        })
         if (textCountResult.success && textCountResult.counts) {
           const now = Date.now()
           for (const sessionId of missingTextCountSessionIds) {
@@ -1948,6 +1984,43 @@ class ChatService {
     return `${this.sessionStatsCacheScope}::${sessionId}`
   }
 
+  private buildScopedGroupMyMessageCountKey(chatroomId: string): string {
+    return `${this.groupMyMessageCountCacheScope}::${chatroomId}`
+  }
+
+  private getGroupMyMessageCountHintEntry(
+    chatroomId: string
+  ): { entry: GroupMyMessageCountCacheEntry; source: 'memory' | 'disk' } | null {
+    const scopedKey = this.buildScopedGroupMyMessageCountKey(chatroomId)
+    const inMemory = this.groupMyMessageCountMemoryCache.get(scopedKey)
+    if (inMemory) {
+      return { entry: inMemory, source: 'memory' }
+    }
+
+    const persisted = this.groupMyMessageCountCacheService.get(this.groupMyMessageCountCacheScope, chatroomId)
+    if (!persisted) return null
+    this.groupMyMessageCountMemoryCache.set(scopedKey, persisted)
+    return { entry: persisted, source: 'disk' }
+  }
+
+  private setGroupMyMessageCountHintEntry(chatroomId: string, messageCount: number, updatedAt?: number): number {
+    const nextCount = Number.isFinite(messageCount) ? Math.max(0, Math.floor(messageCount)) : 0
+    const nextUpdatedAt = Number.isFinite(updatedAt) ? Math.max(0, Math.floor(updatedAt as number)) : Date.now()
+    const scopedKey = this.buildScopedGroupMyMessageCountKey(chatroomId)
+    const existing = this.groupMyMessageCountMemoryCache.get(scopedKey)
+    if (existing && existing.updatedAt > nextUpdatedAt) {
+      return existing.updatedAt
+    }
+
+    const entry: GroupMyMessageCountCacheEntry = {
+      updatedAt: nextUpdatedAt,
+      messageCount: nextCount
+    }
+    this.groupMyMessageCountMemoryCache.set(scopedKey, entry)
+    this.groupMyMessageCountCacheService.set(this.groupMyMessageCountCacheScope, chatroomId, entry)
+    return nextUpdatedAt
+  }
+
   private toSessionStatsCacheStats(stats: ExportSessionStats): SessionStatsCacheStats {
     const normalized: SessionStatsCacheStats = {
       totalMessages: Number.isFinite(stats.totalMessages) ? Math.max(0, Math.floor(stats.totalMessages)) : 0,
@@ -2005,14 +2078,18 @@ class ChatService {
 
   private setSessionStatsCacheEntry(sessionId: string, stats: ExportSessionStats, includeRelations: boolean): number {
     const updatedAt = Date.now()
+    const normalizedStats = this.toSessionStatsCacheStats(stats)
     const entry: SessionStatsCacheEntry = {
       updatedAt,
       includeRelations,
-      stats: this.toSessionStatsCacheStats(stats)
+      stats: normalizedStats
     }
     const scopedKey = this.buildScopedSessionStatsKey(sessionId)
     this.sessionStatsMemoryCache.set(scopedKey, entry)
     this.sessionStatsCacheService.set(this.sessionStatsCacheScope, sessionId, entry)
+    if (sessionId.endsWith('@chatroom') && Number.isFinite(normalizedStats.groupMyMessages)) {
+      this.setGroupMyMessageCountHintEntry(sessionId, normalizedStats.groupMyMessages as number, updatedAt)
+    }
     return updatedAt
   }
 
@@ -2217,6 +2294,9 @@ class ChatService {
 
     if (sessionId.endsWith('@chatroom')) {
       stats.groupActiveSpeakers = senderIdentities.size
+      if (Number.isFinite(stats.groupMyMessages)) {
+        this.setGroupMyMessageCountHintEntry(sessionId, stats.groupMyMessages as number)
+      }
     }
     return stats
   }
@@ -4264,6 +4344,8 @@ class ChatService {
       this.sessionStatsPendingFull.clear()
       this.allGroupSessionIdsCache = null
       this.sessionStatsCacheService.clearAll()
+      this.groupMyMessageCountMemoryCache.clear()
+      this.groupMyMessageCountCacheService.clearAll()
       this.exportContentStatsMemory.clear()
       this.exportContentStatsDirtySessionIds.clear()
       this.exportContentScopeSessionIdsCache = null
@@ -4707,6 +4789,51 @@ class ChatService {
     }
   }
 
+  async getGroupMyMessageCountHint(chatroomId: string): Promise<{
+    success: boolean
+    count?: number
+    updatedAt?: number
+    source?: 'memory' | 'disk'
+    error?: string
+  }> {
+    try {
+      this.refreshSessionMessageCountCacheScope()
+      const normalizedChatroomId = String(chatroomId || '').trim()
+      if (!normalizedChatroomId || !normalizedChatroomId.endsWith('@chatroom')) {
+        return { success: false, error: '群聊ID无效' }
+      }
+
+      const cached = this.getGroupMyMessageCountHintEntry(normalizedChatroomId)
+      if (!cached) return { success: true }
+      return {
+        success: true,
+        count: cached.entry.messageCount,
+        updatedAt: cached.entry.updatedAt,
+        source: cached.source
+      }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  }
+
+  async setGroupMyMessageCountHint(
+    chatroomId: string,
+    messageCount: number,
+    updatedAt?: number
+  ): Promise<{ success: boolean; updatedAt?: number; error?: string }> {
+    try {
+      this.refreshSessionMessageCountCacheScope()
+      const normalizedChatroomId = String(chatroomId || '').trim()
+      if (!normalizedChatroomId || !normalizedChatroomId.endsWith('@chatroom')) {
+        return { success: false, error: '群聊ID无效' }
+      }
+      const savedAt = this.setGroupMyMessageCountHintEntry(normalizedChatroomId, messageCount, updatedAt)
+      return { success: true, updatedAt: savedAt }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  }
+
   async getExportSessionStats(sessionIds: string[], options: ExportSessionStatsOptions = {}): Promise<{
     success: boolean
     data?: Record<string, ExportSessionStats>
@@ -4743,12 +4870,18 @@ class ChatService {
       const now = Date.now()
 
       for (const sessionId of normalizedSessionIds) {
+        const groupMyMessagesHint = sessionId.endsWith('@chatroom')
+          ? this.getGroupMyMessageCountHintEntry(sessionId)
+          : null
         if (!forceRefresh) {
           const cachedResult = this.getSessionStatsCacheEntry(sessionId)
           if (cachedResult && this.supportsRequestedRelation(cachedResult.entry, includeRelations)) {
             const stale = now - cachedResult.entry.updatedAt > this.sessionStatsCacheTtlMs
             if (!stale || allowStaleCache) {
               resultMap[sessionId] = this.fromSessionStatsCacheStats(cachedResult.entry.stats)
+              if (groupMyMessagesHint && Number.isFinite(groupMyMessagesHint.entry.messageCount)) {
+                resultMap[sessionId].groupMyMessages = groupMyMessagesHint.entry.messageCount
+              }
               cacheMeta[sessionId] = {
                 updatedAt: cachedResult.entry.updatedAt,
                 stale,

@@ -1061,6 +1061,10 @@ function registerIpcHandlers() {
     return chatService.getExportSessionStats(sessionIds, options)
   })
 
+  ipcMain.handle('chat:getGroupMyMessageCountHint', async (_, chatroomId: string) => {
+    return chatService.getGroupMyMessageCountHint(chatroomId)
+  })
+
   ipcMain.handle('chat:getImageData', async (_, sessionId: string, msgId: string) => {
     return chatService.getImageData(sessionId, msgId)
   })

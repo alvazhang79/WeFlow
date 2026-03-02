@@ -875,6 +875,7 @@ class GroupAnalyticsService {
     ])
     const groupNicknames = await this.getGroupNicknamesForRoom(chatroomId, nicknameCandidates)
     const myWxid = this.cleanAccountDirName(this.configService.get('myWxid') || '')
+    let myGroupMessageCountHint: number | undefined
 
     const data: GroupMembersPanelEntry[] = members
       .map((member) => {
@@ -915,6 +916,17 @@ class GroupAnalyticsService {
         }
       })
       .filter((member): member is GroupMembersPanelEntry => Boolean(member))
+
+    if (includeMessageCounts && myWxid) {
+      const selfEntry = data.find((member) => this.cleanAccountDirName(member.username) === myWxid)
+      if (selfEntry && Number.isFinite(selfEntry.messageCount)) {
+        myGroupMessageCountHint = Math.max(0, Math.floor(selfEntry.messageCount))
+      }
+    }
+
+    if (includeMessageCounts && Number.isFinite(myGroupMessageCountHint)) {
+      void chatService.setGroupMyMessageCountHint(chatroomId, myGroupMessageCountHint as number)
+    }
 
     return { success: true, data: this.sortGroupMembersPanelEntries(data) }
   }

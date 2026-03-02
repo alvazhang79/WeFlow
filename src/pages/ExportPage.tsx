@@ -876,7 +876,6 @@ function ExportPage() {
     totalFriends: 0
   })
   const [contentSessionCounts, setContentSessionCounts] = useState<ExportContentSessionCountsSummary>(defaultContentSessionCounts)
-  const [isContentSessionCountsLoading, setIsContentSessionCountsLoading] = useState(true)
   const [hasSeededContentSessionCounts, setHasSeededContentSessionCounts] = useState(false)
   const [hasSeededSnsStats, setHasSeededSnsStats] = useState(false)
   const [nowTick, setNowTick] = useState(Date.now())
@@ -904,6 +903,7 @@ function ExportPage() {
   const inProgressSessionIdsRef = useRef<string[]>([])
   const activeTaskCountRef = useRef(0)
   const hasBaseConfigReadyRef = useRef(false)
+  const contentSessionCountsForceRetryRef = useRef(0)
 
   const ensureExportCacheScope = useCallback(async (): Promise<string> => {
     if (exportCacheScopeReadyRef.current) {
@@ -1413,9 +1413,6 @@ function ExportPage() {
   }, [])
 
   const loadContentSessionCounts = useCallback(async (options?: { silent?: boolean; forceRefresh?: boolean }) => {
-    if (!options?.silent) {
-      setIsContentSessionCountsLoading(true)
-    }
     try {
       const result = await withTimeout(
         window.electronAPI.chat.getExportContentSessionCounts({
@@ -1437,14 +1434,23 @@ function ExportPage() {
           refreshing: result.data.refreshing === true
         }
         setContentSessionCounts(next)
-        setHasSeededContentSessionCounts(true)
+        const looksLikeAllZero = next.totalSessions > 0 &&
+          next.textSessions === 0 &&
+          next.voiceSessions === 0 &&
+          next.imageSessions === 0 &&
+          next.videoSessions === 0 &&
+          next.emojiSessions === 0
+
+        if (looksLikeAllZero && contentSessionCountsForceRetryRef.current < 3) {
+          contentSessionCountsForceRetryRef.current += 1
+          void window.electronAPI.chat.refreshExportContentSessionCounts({ forceRefresh: true })
+        } else {
+          contentSessionCountsForceRetryRef.current = 0
+          setHasSeededContentSessionCounts(true)
+        }
       }
     } catch (error) {
       console.error('加载导出内容会话统计失败:', error)
-    } finally {
-      if (!options?.silent) {
-        setIsContentSessionCountsLoading(false)
-      }
     }
   }, [])
 
@@ -3205,7 +3211,7 @@ function ExportPage() {
   const shouldShowFormatSection = !isContentScopeDialog || isContentTextDialog
   const shouldShowMediaSection = !isContentScopeDialog
   const isTabCountComputing = isSharedTabCountsLoading && !isSharedTabCountsReady
-  const isSessionCardStatsLoading = isBaseConfigLoading || (isContentSessionCountsLoading && !hasSeededContentSessionCounts)
+  const isSessionCardStatsLoading = isBaseConfigLoading || !hasSeededContentSessionCounts
   const isSessionCardStatsRefreshing = contentSessionCounts.refreshing || contentSessionCounts.pendingMediaSessions > 0
   const isSnsCardStatsLoading = !hasSeededSnsStats
   const taskRunningCount = tasks.filter(task => task.status === 'running').length

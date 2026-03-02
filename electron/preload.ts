@@ -165,6 +165,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       sessionIds: string[],
       options?: { includeRelations?: boolean; forceRefresh?: boolean; allowStaleCache?: boolean }
     ) => ipcRenderer.invoke('chat:getExportSessionStats', sessionIds, options),
+    getGroupMyMessageCountHint: (chatroomId: string) =>
+      ipcRenderer.invoke('chat:getGroupMyMessageCountHint', chatroomId),
     getImageData: (sessionId: string, msgId: string) => ipcRenderer.invoke('chat:getImageData', sessionId, msgId),
     getVoiceData: (sessionId: string, msgId: string, createTime?: number, serverId?: string | number) =>
       ipcRenderer.invoke('chat:getVoiceData', sessionId, msgId, createTime, serverId),

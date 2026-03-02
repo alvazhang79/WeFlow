@@ -240,6 +240,13 @@ export interface ElectronAPI {
       needsRefresh?: string[]
       error?: string
     }>
+    getGroupMyMessageCountHint: (chatroomId: string) => Promise<{
+      success: boolean
+      count?: number
+      updatedAt?: number
+      source?: 'memory' | 'disk'
+      error?: string
+    }>
     getImageData: (sessionId: string, msgId: string) => Promise<{ success: boolean; data?: string; error?: string }>
     getVoiceData: (sessionId: string, msgId: string, createTime?: number, serverId?: string | number) => Promise<{ success: boolean; data?: string; error?: string }>
     getAllVoiceMessages: (sessionId: string) => Promise<{ success: boolean; messages?: Message[]; error?: string }>
