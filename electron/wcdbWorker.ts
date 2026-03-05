@@ -54,6 +54,9 @@ if (parentPort) {
                 case 'getMessageCount':
                     result = await core.getMessageCount(payload.sessionId)
                     break
+                case 'getMessageCounts':
+                    result = await core.getMessageCounts(payload.sessionIds)
+                    break
                 case 'getDisplayNames':
                     result = await core.getDisplayNames(payload.usernames)
                     break
@@ -171,7 +174,15 @@ if (parentPort) {
                 case 'deleteMessage':
                     result = await core.deleteMessage(payload.sessionId, payload.localId, payload.createTime, payload.dbPathHint)
                     break
-
+                case 'cloudInit':
+                    result = await core.cloudInit(payload.intervalSeconds)
+                    break
+                case 'cloudReport':
+                    result = await core.cloudReport(payload.statsJson)
+                    break
+                case 'cloudStop':
+                    result = core.cloudStop()
+                    break
                 default:
                     result = { success: false, error: `Unknown method: ${type}` }
             }
