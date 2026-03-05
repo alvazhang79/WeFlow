@@ -2298,6 +2298,16 @@
     }
   }
 
+  .sns-dialog-tip {
+    padding: 10px 16px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    background: color-mix(in srgb, var(--bg-primary) 78%, var(--bg-secondary));
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    word-break: break-word;
+  }
+
   .sns-dialog-body {
     flex: 1;
     min-height: 0;
@@ -3242,6 +3252,11 @@
 
     .sns-dialog-header {
       padding: 12px;
+    }
+
+    .sns-dialog-tip {
+      padding: 10px 12px;
+      line-height: 1.55;
     }
 
     .sns-dialog-body {
