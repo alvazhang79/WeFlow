@@ -52,6 +52,7 @@ interface SnsContactIdentity {
     remark?: string
     nickName?: string
     displayName: string
+    avatarUrl?: string
 }
 
 interface ParsedLikeUser {
@@ -79,6 +80,7 @@ interface ArkmeLikeDetail {
     remark?: string
     nickName?: string
     displayName: string
+    avatarUrl?: string
     source: 'xml' | 'legacy'
 }
 
@@ -92,6 +94,7 @@ interface ArkmeCommentDetail {
     remark?: string
     nickName?: string
     displayName: string
+    avatarUrl?: string
     content: string
     refCommentId: string
     refNickname?: string
@@ -102,6 +105,7 @@ interface ArkmeCommentDetail {
     refRemark?: string
     refNickName?: string
     refDisplayName?: string
+    refAvatarUrl?: string
     emojis?: { url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }[]
     source: 'xml' | 'legacy'
 }
@@ -323,6 +327,7 @@ class SnsService {
                 let alias: string | undefined
                 let remark: string | undefined
                 let nickName: string | undefined
+                let avatarUrl = this.toOptionalString(cached?.avatarUrl)
 
                 try {
                     const contactResult = await wcdbService.getContact(normalized)
@@ -336,6 +341,17 @@ class SnsService {
                     // 联系人补全失败不影响导出
                 }
 
+                if (!avatarUrl) {
+                    try {
+                        const avatarResult = await wcdbService.getAvatarUrls([normalized])
+                        if (avatarResult.success && avatarResult.map) {
+                            avatarUrl = this.toOptionalString(avatarResult.map[normalized])
+                        }
+                    } catch {
+                        // 头像补全失败不影响导出
+                    }
+                }
+
                 const displayName = remark || nickName || alias || cached?.displayName || normalized
                 return {
                     username: normalized,
@@ -344,7 +360,8 @@ class SnsService {
                     wechatId: alias,
                     remark,
                     nickName,
-                    displayName
+                    displayName,
+                    avatarUrl
                 }
             })()
             identityCache.set(normalized, pending)
@@ -412,6 +429,7 @@ class SnsService {
                 remark: identity?.remark,
                 nickName: identity?.nickName,
                 displayName: identity?.displayName || nickname || username || '',
+                avatarUrl: identity?.avatarUrl,
                 source: likeSource
             })
         }
@@ -483,6 +501,7 @@ class SnsService {
                 remark: actor?.remark,
                 nickName: actor?.nickName,
                 displayName: actor?.displayName || nickname || username || '',
+                avatarUrl: actor?.avatarUrl,
                 content: comment.content || '',
                 refCommentId: comment.refCommentId || '',
                 refNickname: comment.refNickname || refActor?.displayName,
@@ -493,6 +512,7 @@ class SnsService {
                 refRemark: refActor?.remark,
                 refNickName: refActor?.nickName,
                 refDisplayName: refActor?.displayName,
+                refAvatarUrl: refActor?.avatarUrl,
                 emojis: comment.emojis,
                 source: commentSource
             })
@@ -1021,7 +1041,8 @@ class SnsService {
         const result = await wcdbService.getSnsTimeline(limit, offset, usernames, keyword, startTime, endTime)
         if (!result.success || !result.timeline || result.timeline.length === 0) return result
 
-        const enrichedTimeline = result.timeline.map((post: any) => {
+        const identityCache = new Map<string, Promise<SnsContactIdentity | null>>()
+        const enrichedTimeline = await Promise.all(result.timeline.map(async (post: any) => {
             const contact = this.contactCache.get(post.username)
             const isVideoPost = post.type === 15
             const videoKey = extractVideoKey(post.rawXml || '')
@@ -1061,14 +1082,22 @@ class SnsService {
                 finalComments = this.fixCommentRefs(dllComments)
             }
 
+            const normalizedPost: SnsPost = {
+                ...post,
+                comments: finalComments
+            }
+            const { likesDetail, commentsDetail } = await this.buildArkmeInteractionDetails(normalizedPost, identityCache)
+
             return {
                 ...post,
                 avatarUrl: contact?.avatarUrl,
                 nickname: post.nickname || contact?.displayName || post.username,
                 media: fixedMedia,
-                comments: finalComments
+                comments: finalComments,
+                likesDetail,
+                commentsDetail
             }
-        })
+        }))
 
         return { ...result, timeline: enrichedTimeline }
     }

@@ -623,17 +623,21 @@
 
 .session-mutual-friends-row {
   display: grid;
-  grid-template-columns: 36px minmax(120px, 0.82fr) max-content 56px 96px minmax(0, 1.28fr);
-  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) 72px 108px;
+  gap: 12px;
   align-items: center;
-  padding: 8px 12px;
+  padding: 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
   font-size: 12px;
   color: var(--text-secondary);
-  min-height: 42px;
+  min-height: 72px;
 
   &:last-child {
     border-bottom: none;
+  }
+
+  &.unconfirmed {
+    background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   }
 }
 
@@ -646,6 +650,32 @@
 .session-mutual-friends-rank {
   color: var(--text-tertiary);
   text-align: center;
+}
+
+.session-mutual-friends-user {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-mutual-friends-user-avatar {
+  flex-shrink: 0;
+}
+
+.session-mutual-friends-user-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-mutual-friends-user-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .session-mutual-friends-name {
@@ -684,6 +714,30 @@
     color: var(--primary);
     border-color: color-mix(in srgb, var(--primary) 35%, var(--border-color));
     background: color-mix(in srgb, var(--primary) 10%, var(--bg-secondary));
+  }
+}
+
+.session-mutual-friends-identity-badge {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  line-height: 1;
+  color: #92400e;
+  border: 1px solid color-mix(in srgb, #d97706 34%, var(--border-color));
+  background: color-mix(in srgb, #f59e0b 11%, var(--bg-secondary));
+  white-space: nowrap;
+}
+
+.session-mutual-friends-identity {
+  min-width: 0;
+  color: var(--text-secondary);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.secondary {
+    color: var(--text-tertiary);
   }
 }
 
@@ -1980,6 +2034,7 @@
     height: var(--contacts-default-list-height);
     overflow: hidden;
     padding: 0 0 12px;
+    position: relative;
   }
 
   .contacts-virtuoso {
@@ -1994,6 +2049,43 @@
       background: var(--text-tertiary);
       border-radius: 3px;
       opacity: 0.3;
+    }
+  }
+
+  .contacts-action-rail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 12px;
+    width: max(var(--contacts-action-col-width), 184px);
+    z-index: 18;
+    pointer-events: none;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: -12px;
+      width: 12px;
+      pointer-events: none;
+      background: linear-gradient(to right, transparent, var(--bg-primary));
+    }
+  }
+
+  .contacts-action-rail-row {
+    position: absolute;
+    right: 0;
+    width: 100%;
+    height: var(--contacts-row-height);
+    padding: 0 0 4px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: flex-end;
+    pointer-events: none;
+
+    &.selected .contacts-action-rail-card {
+      background: rgba(var(--primary-rgb), 0.08);
     }
   }
 
@@ -2089,10 +2181,6 @@
     padding-bottom: 4px;
 
     &.selected .contact-item {
-      background: rgba(var(--primary-rgb), 0.08);
-    }
-
-    &.selected .row-action-cell {
       background: rgba(var(--primary-rgb), 0.08);
     }
   }
@@ -2474,26 +2562,30 @@
   }
 }
 
-.row-action-cell {
+.row-action-cell,
+.contacts-action-rail-card {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  width: var(--contacts-action-col-width);
-  min-width: var(--contacts-action-col-width);
-  flex-shrink: 0;
-  position: sticky;
-  right: 0;
-  z-index: 10;
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--contacts-row-height) - 4px);
+  padding: 0 6px 0 0;
+  box-sizing: border-box;
+  justify-content: center;
   background: var(--bg-primary);
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 
   &::before {
     content: '';
     position: absolute;
     top: -12px;
     bottom: -12px;
-    left: -8px;
-    width: 8px;
+    left: -12px;
+    width: 12px;
     pointer-events: none;
     background: linear-gradient(to right, transparent, var(--bg-primary));
   }
@@ -4161,13 +4253,19 @@
   }
 
   .session-mutual-friends-row {
-    grid-template-columns: 30px minmax(88px, 0.9fr) max-content 44px 74px;
+    grid-template-columns: 28px minmax(0, 1fr) 56px 72px;
     gap: 8px;
     font-size: 12px;
   }
 
-  .session-mutual-friends-desc {
-    display: none;
+  .session-mutual-friends-user {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .session-mutual-friends-user-avatar {
+    width: 36px !important;
+    height: 36px !important;
   }
 
   .session-load-detail-row {

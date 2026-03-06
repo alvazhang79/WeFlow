@@ -767,7 +767,53 @@ export interface ElectronAPI {
           }
         }>
         likes: Array<string>
-        comments: Array<{ id: string; nickname: string; content: string; refCommentId: string; refNickname?: string; emojis?: Array<{ url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }> }>
+        comments: Array<{
+          id: string
+          nickname: string
+          username?: string
+          content: string
+          refCommentId: string
+          refNickname?: string
+          refUsername?: string
+          emojis?: Array<{ url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }>
+        }>
+        likesDetail?: Array<{
+          nickname: string
+          username?: string
+          wxid?: string
+          alias?: string
+          wechatId?: string
+          remark?: string
+          nickName?: string
+          displayName: string
+          avatarUrl?: string
+          source: 'xml' | 'legacy'
+        }>
+        commentsDetail?: Array<{
+          id: string
+          nickname: string
+          username?: string
+          wxid?: string
+          alias?: string
+          wechatId?: string
+          remark?: string
+          nickName?: string
+          displayName: string
+          avatarUrl?: string
+          content: string
+          refCommentId: string
+          refNickname?: string
+          refUsername?: string
+          refWxid?: string
+          refAlias?: string
+          refWechatId?: string
+          refRemark?: string
+          refNickName?: string
+          refDisplayName?: string
+          refAvatarUrl?: string
+          emojis?: Array<{ url: string; md5: string; width: number; height: number; encryptUrl?: string; aesKey?: string }>
+          source: 'xml' | 'legacy'
+        }>
         rawXml?: string
       }>
       error?: string

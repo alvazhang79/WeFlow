@@ -28,10 +28,51 @@ export interface SnsCommentEmoji {
 export interface SnsComment {
     id: string
     nickname: string
+    username?: string
     content: string
     refCommentId: string
     refNickname?: string
+    refUsername?: string
     emojis?: SnsCommentEmoji[]
+}
+
+export interface SnsLikeDetail {
+    nickname: string
+    username?: string
+    wxid?: string
+    alias?: string
+    wechatId?: string
+    remark?: string
+    nickName?: string
+    displayName: string
+    avatarUrl?: string
+    source: 'xml' | 'legacy'
+}
+
+export interface SnsCommentDetail {
+    id: string
+    nickname: string
+    username?: string
+    wxid?: string
+    alias?: string
+    wechatId?: string
+    remark?: string
+    nickName?: string
+    displayName: string
+    avatarUrl?: string
+    content: string
+    refCommentId: string
+    refNickname?: string
+    refUsername?: string
+    refWxid?: string
+    refAlias?: string
+    refWechatId?: string
+    refRemark?: string
+    refNickName?: string
+    refDisplayName?: string
+    refAvatarUrl?: string
+    emojis?: SnsCommentEmoji[]
+    source: 'xml' | 'legacy'
 }
 
 export interface SnsPost {
@@ -46,6 +87,8 @@ export interface SnsPost {
     media: SnsMedia[]
     likes: string[]
     comments: SnsComment[]
+    likesDetail?: SnsLikeDetail[]
+    commentsDetail?: SnsCommentDetail[]
     rawXml?: string
     linkTitle?: string
     linkUrl?: string

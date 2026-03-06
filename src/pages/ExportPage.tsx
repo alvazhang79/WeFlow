@@ -44,11 +44,12 @@ import {
   subscribeBackgroundTasks
 } from '../services/backgroundTaskMonitor'
 import { useContactTypeCountsStore } from '../stores/contactTypeCountsStore'
+import { Avatar } from '../components/Avatar'
 import { SnsPostItem } from '../components/Sns/SnsPostItem'
 import { ContactSnsTimelineDialog } from '../components/Sns/ContactSnsTimelineDialog'
 import { ExportDateRangeDialog } from '../components/Export/ExportDateRangeDialog'
 import { ExportDefaultsSettingsForm, type ExportDefaultsSettingsPatch } from '../components/Export/ExportDefaultsSettingsForm'
-import type { SnsPost } from '../types/sns'
+import type { SnsCommentDetail, SnsLikeDetail, SnsPost } from '../types/sns'
 import {
   cloneExportDateRange,
   createDefaultDateRange,
@@ -72,6 +73,7 @@ type DisplayNamePreference = 'group-nickname' | 'remark' | 'nickname'
 
 type TextExportFormat = 'chatlab' | 'chatlab-jsonl' | 'json' | 'arkme-json' | 'html' | 'txt' | 'excel' | 'weclone' | 'sql'
 type SnsTimelineExportFormat = 'json' | 'html' | 'arkmejson'
+const CONTACTS_ROW_HEIGHT = 76
 
 interface ExportOptions {
   format: TextExportFormat
@@ -513,6 +515,12 @@ const getAvatarLetter = (name: string): string => {
   return [...name][0] || '?'
 }
 
+const toOptionalString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
 const toComparableNameSet = (values: Array<string | undefined | null>): Set<string> => {
   const set = new Set<string>()
   for (const value of values) {
@@ -602,7 +610,15 @@ type SessionMutualFriendDirection = 'incoming' | 'outgoing' | 'bidirectional'
 type SessionMutualFriendBehavior = 'likes' | 'comments' | 'both'
 
 interface SessionMutualFriendItem {
+  key: string
+  identityKey?: string
   name: string
+  username?: string
+  wxid?: string
+  wechatId?: string
+  remark?: string
+  avatarUrl?: string
+  isConfirmed: boolean
   incomingLikeCount: number
   incomingCommentCount: number
   outgoingLikeCount: number
@@ -619,6 +635,63 @@ interface SessionMutualFriendsMetric {
   loadedPosts: number
   totalPosts: number | null
   computedAt: number
+}
+
+const getSessionMutualFriendIdentityKey = (username?: string, wechatId?: string): string | undefined => {
+  const normalizedUsername = toOptionalString(username)
+  if (normalizedUsername) return `u:${normalizedUsername}`
+  const normalizedWechatId = toOptionalString(wechatId)
+  if (normalizedWechatId) return `w:${normalizedWechatId}`
+  return undefined
+}
+
+const getSessionMutualFriendFallbackKey = (name: string): string => `n:${name || '未知用户'}`
+
+const resolveSessionMutualFriendName = (params: {
+  displayName?: string
+  remark?: string
+  nickName?: string
+  wechatId?: string
+  nickname?: string
+  username?: string
+}): string => {
+  return (
+    toOptionalString(params.displayName) ||
+    toOptionalString(params.remark) ||
+    toOptionalString(params.nickName) ||
+    toOptionalString(params.wechatId) ||
+    toOptionalString(params.nickname) ||
+    toOptionalString(params.username) ||
+    '未知用户'
+  )
+}
+
+const applySessionMutualFriendDerivedState = (item: SessionMutualFriendItem): void => {
+  const incomingTotal = item.incomingLikeCount + item.incomingCommentCount
+  const outgoingTotal = item.outgoingLikeCount + item.outgoingCommentCount
+  item.direction = incomingTotal > 0 && outgoingTotal > 0
+    ? 'bidirectional'
+    : incomingTotal > 0
+      ? 'incoming'
+      : 'outgoing'
+  item.behavior = summarizeMutualFriendBehavior(
+    item.incomingLikeCount + item.outgoingLikeCount,
+    item.incomingCommentCount + item.outgoingCommentCount
+  )
+}
+
+const mergeSessionMutualFriendItemProfile = (
+  target: SessionMutualFriendItem,
+  profile: Partial<Pick<SessionMutualFriendItem, 'identityKey' | 'username' | 'wxid' | 'wechatId' | 'remark' | 'avatarUrl' | 'name' | 'isConfirmed'>>
+): void => {
+  if (profile.identityKey && !target.identityKey) target.identityKey = profile.identityKey
+  if (profile.username && !target.username) target.username = profile.username
+  if (profile.wxid && !target.wxid) target.wxid = profile.wxid
+  if (profile.wechatId && !target.wechatId) target.wechatId = profile.wechatId
+  if (profile.remark && !target.remark) target.remark = profile.remark
+  if (profile.avatarUrl && !target.avatarUrl) target.avatarUrl = profile.avatarUrl
+  if (profile.name && (!target.name || !target.isConfirmed)) target.name = profile.name
+  if (profile.isConfirmed) target.isConfirmed = true
 }
 
 interface SessionSnsRankCacheEntry {
@@ -678,55 +751,121 @@ const buildSessionMutualFriendsMetric = (
 ): SessionMutualFriendsMetric => {
   const friendMap = new Map<string, SessionMutualFriendItem>()
 
-  for (const post of posts) {
-    const createTime = Number(post?.createTime) || 0
-    const likes = Array.isArray(post?.likes) ? post.likes : []
-    const comments = Array.isArray(post?.comments) ? post.comments : []
-
-    for (const likeNameRaw of likes) {
-      const name = String(likeNameRaw || '').trim() || '未知用户'
-      const existing = friendMap.get(name)
-      if (existing) {
-        existing.incomingLikeCount += 1
-        existing.totalCount += 1
-        existing.behavior = existing.incomingCommentCount > 0 ? 'both' : 'likes'
-        if (createTime > existing.latestTime) existing.latestTime = createTime
-        continue
-      }
-      friendMap.set(name, {
-        name,
-        incomingLikeCount: 1,
-        incomingCommentCount: 0,
-        outgoingLikeCount: 0,
-        outgoingCommentCount: 0,
-        totalCount: 1,
-        latestTime: createTime,
-        direction: 'incoming',
-        behavior: 'likes'
-      })
+  const ensureItem = (seed: {
+    name: string
+    username?: string
+    wxid?: string
+    wechatId?: string
+    remark?: string
+    avatarUrl?: string
+    identityKey?: string
+    isConfirmed: boolean
+  }): SessionMutualFriendItem => {
+    const key = seed.identityKey || getSessionMutualFriendFallbackKey(seed.name)
+    const existing = friendMap.get(key)
+    if (existing) {
+      mergeSessionMutualFriendItemProfile(existing, seed)
+      return existing
     }
 
-    for (const comment of comments) {
-      const name = String(comment?.nickname || '').trim() || '未知用户'
-      const existing = friendMap.get(name)
-      if (existing) {
-        existing.incomingCommentCount += 1
-        existing.totalCount += 1
-        existing.behavior = existing.incomingLikeCount > 0 ? 'both' : 'comments'
-        if (createTime > existing.latestTime) existing.latestTime = createTime
-        continue
-      }
-      friendMap.set(name, {
-        name,
-        incomingLikeCount: 0,
-        incomingCommentCount: 1,
-        outgoingLikeCount: 0,
-        outgoingCommentCount: 0,
-        totalCount: 1,
-        latestTime: createTime,
-        direction: 'incoming',
-        behavior: 'comments'
+    const created: SessionMutualFriendItem = {
+      key,
+      identityKey: seed.identityKey,
+      name: seed.name,
+      username: seed.username,
+      wxid: seed.wxid,
+      wechatId: seed.wechatId,
+      remark: seed.remark,
+      avatarUrl: seed.avatarUrl,
+      isConfirmed: seed.isConfirmed,
+      incomingLikeCount: 0,
+      incomingCommentCount: 0,
+      outgoingLikeCount: 0,
+      outgoingCommentCount: 0,
+      totalCount: 0,
+      latestTime: 0,
+      direction: 'incoming',
+      behavior: 'likes'
+    }
+    friendMap.set(key, created)
+    return created
+  }
+
+  for (const post of posts) {
+    const createTime = Number(post?.createTime) || 0
+    const likesDetail = Array.isArray(post?.likesDetail) && post.likesDetail.length > 0
+      ? post.likesDetail
+      : (Array.isArray(post?.likes) ? post.likes : []).map((likeNameRaw): SnsLikeDetail => ({
+        nickname: String(likeNameRaw || '').trim() || '未知用户',
+        displayName: String(likeNameRaw || '').trim() || '未知用户',
+        source: 'legacy'
+      }))
+    const commentsDetail = Array.isArray(post?.commentsDetail) && post.commentsDetail.length > 0
+      ? post.commentsDetail
+      : (Array.isArray(post?.comments) ? post.comments : []).map((comment): SnsCommentDetail => ({
+        id: String(comment?.id || ''),
+        nickname: String(comment?.nickname || '').trim() || '未知用户',
+        displayName: String(comment?.nickname || '').trim() || '未知用户',
+        content: String(comment?.content || ''),
+        refCommentId: String(comment?.refCommentId || ''),
+        refNickname: comment?.refNickname,
+        refUsername: comment?.refUsername,
+        emojis: comment?.emojis,
+        source: 'legacy'
+      }))
+
+    for (const like of likesDetail) {
+      const username = toOptionalString(like.username || like.wxid)
+      const wechatId = toOptionalString(like.wechatId || like.alias)
+      const identityKey = getSessionMutualFriendIdentityKey(username, wechatId)
+      const existing = ensureItem({
+        name: resolveSessionMutualFriendName({
+          displayName: like.displayName,
+          remark: like.remark,
+          nickName: like.nickName,
+          wechatId,
+          nickname: like.nickname,
+          username
+        }),
+        username,
+        wxid: username,
+        wechatId,
+        remark: toOptionalString(like.remark),
+        avatarUrl: toOptionalString(like.avatarUrl),
+        identityKey,
+        isConfirmed: Boolean(identityKey && username)
       })
+      existing.incomingLikeCount += 1
+      existing.totalCount += 1
+      if (createTime > existing.latestTime) existing.latestTime = createTime
+      applySessionMutualFriendDerivedState(existing)
+    }
+
+    for (const comment of commentsDetail) {
+      const username = toOptionalString(comment.username || comment.wxid)
+      const wechatId = toOptionalString(comment.wechatId || comment.alias)
+      const identityKey = getSessionMutualFriendIdentityKey(username, wechatId)
+      const existing = ensureItem({
+        name: resolveSessionMutualFriendName({
+          displayName: comment.displayName,
+          remark: comment.remark,
+          nickName: comment.nickName,
+          wechatId,
+          nickname: comment.nickname,
+          username
+        }),
+        username,
+        wxid: username,
+        wechatId,
+        remark: toOptionalString(comment.remark),
+        avatarUrl: toOptionalString(comment.avatarUrl),
+        identityKey,
+        isConfirmed: Boolean(identityKey && username)
+      })
+      existing.incomingCommentCount += 1
+      existing.totalCount += 1
+      if (createTime > existing.latestTime) existing.latestTime = createTime
+      applySessionMutualFriendDerivedState(existing)
     }
   }
 
@@ -1513,6 +1652,8 @@ function ExportPage() {
   const [nowTick, setNowTick] = useState(Date.now())
   const [isContactsListAtTop, setIsContactsListAtTop] = useState(true)
   const [isContactsHeaderDragging, setIsContactsHeaderDragging] = useState(false)
+  const [contactsListScrollTop, setContactsListScrollTop] = useState(0)
+  const [contactsVisibleRange, setContactsVisibleRange] = useState({ startIndex: 0, endIndex: -1 })
   const [contactsHorizontalScrollMetrics, setContactsHorizontalScrollMetrics] = useState({
     viewportWidth: 0,
     contentWidth: 0
@@ -2788,21 +2929,27 @@ function ExportPage() {
 
   const getSessionMutualFriendProfile = useCallback((sessionId: string): {
     displayName: string
-    candidateNames: Set<string>
+    remark?: string
+    wechatId?: string
+    avatarUrl?: string
+    primaryIdentityKey: string
+    candidateIdentityKeys: Set<string>
   } => {
     const normalizedSessionId = String(sessionId || '').trim()
     const contact = contactsList.find(item => item.username === normalizedSessionId)
     const session = sessionsRef.current.find(item => item.username === normalizedSessionId)
     const displayName = contact?.displayName || contact?.remark || contact?.nickname || session?.displayName || normalizedSessionId
+    const wechatId = toOptionalString(contact?.alias)
+    const candidateIdentityKeys = new Set<string>()
+    candidateIdentityKeys.add(`u:${normalizedSessionId}`)
+    if (wechatId) candidateIdentityKeys.add(`w:${wechatId}`)
     return {
       displayName,
-      candidateNames: toComparableNameSet([
-        displayName,
-        contact?.displayName,
-        contact?.remark,
-        contact?.nickname,
-        contact?.alias
-      ])
+      remark: toOptionalString(contact?.remark),
+      wechatId,
+      avatarUrl: toOptionalString(contact?.avatarUrl),
+      primaryIdentityKey: `u:${normalizedSessionId}`,
+      candidateIdentityKeys
     }
   }, [contactsList])
 
@@ -2814,41 +2961,54 @@ function ExportPage() {
     const directMetric = directMetrics[normalizedTargetSessionId]
     if (!directMetric) return null
 
-    const { candidateNames } = getSessionMutualFriendProfile(normalizedTargetSessionId)
+    const targetProfile = getSessionMutualFriendProfile(normalizedTargetSessionId)
     const mergedMap = new Map<string, SessionMutualFriendItem>()
     for (const item of directMetric.items) {
-      mergedMap.set(item.name, { ...item })
+      mergedMap.set(item.key, { ...item })
     }
 
     for (const [sourceSessionId, sourceMetric] of Object.entries(directMetrics)) {
       if (!sourceMetric || sourceSessionId === normalizedTargetSessionId) continue
       const sourceProfile = getSessionMutualFriendProfile(sourceSessionId)
       if (!sourceProfile.displayName) continue
-      if (mergedMap.has(sourceProfile.displayName)) continue
-
-      const reverseMatches = sourceMetric.items.filter(item => candidateNames.has(item.name))
+      const reverseMatches = sourceMetric.items.filter(item => {
+        if (!item.identityKey) return false
+        return targetProfile.candidateIdentityKeys.has(item.identityKey)
+      })
       if (reverseMatches.length === 0) continue
 
       const reverseCount = reverseMatches.reduce((sum, item) => sum + item.totalCount, 0)
       const reverseLikeCount = reverseMatches.reduce((sum, item) => sum + item.incomingLikeCount, 0)
       const reverseCommentCount = reverseMatches.reduce((sum, item) => sum + item.incomingCommentCount, 0)
       const reverseLatestTime = reverseMatches.reduce((latest, item) => Math.max(latest, item.latestTime), 0)
-      const existing = mergedMap.get(sourceProfile.displayName)
+      const existing = mergedMap.get(sourceProfile.primaryIdentityKey)
       if (existing) {
+        mergeSessionMutualFriendItemProfile(existing, {
+          identityKey: sourceProfile.primaryIdentityKey,
+          username: sourceSessionId,
+          wxid: sourceSessionId,
+          wechatId: sourceProfile.wechatId,
+          remark: sourceProfile.remark,
+          avatarUrl: sourceProfile.avatarUrl,
+          name: sourceProfile.displayName,
+          isConfirmed: true
+        })
         existing.outgoingLikeCount += reverseLikeCount
         existing.outgoingCommentCount += reverseCommentCount
         existing.totalCount += reverseCount
         existing.latestTime = Math.max(existing.latestTime, reverseLatestTime)
-        existing.direction = (existing.incomingLikeCount + existing.incomingCommentCount) > 0
-          ? 'bidirectional'
-          : 'outgoing'
-        existing.behavior = summarizeMutualFriendBehavior(
-          existing.incomingLikeCount + existing.outgoingLikeCount,
-          existing.incomingCommentCount + existing.outgoingCommentCount
-        )
+        applySessionMutualFriendDerivedState(existing)
       } else {
-        mergedMap.set(sourceProfile.displayName, {
+        const created: SessionMutualFriendItem = {
+          key: sourceProfile.primaryIdentityKey,
+          identityKey: sourceProfile.primaryIdentityKey,
           name: sourceProfile.displayName,
+          username: sourceSessionId,
+          wxid: sourceSessionId,
+          wechatId: sourceProfile.wechatId,
+          remark: sourceProfile.remark,
+          avatarUrl: sourceProfile.avatarUrl,
+          isConfirmed: true,
           incomingLikeCount: 0,
           incomingCommentCount: 0,
           outgoingLikeCount: reverseLikeCount,
@@ -2857,7 +3017,8 @@ function ExportPage() {
           latestTime: reverseLatestTime,
           direction: 'outgoing',
           behavior: summarizeMutualFriendBehavior(reverseLikeCount, reverseCommentCount)
-        })
+        }
+        mergedMap.set(created.key, created)
       }
     }
 
@@ -2887,7 +3048,7 @@ function ExportPage() {
     for (const targetSessionId of allSessionIds) {
       if (targetSessionId === normalizedSessionId) continue
       const targetProfile = getSessionMutualFriendProfile(targetSessionId)
-      if (directMetric.items.some(item => targetProfile.candidateNames.has(item.name))) {
+      if (directMetric.items.some(item => item.identityKey && targetProfile.candidateIdentityKeys.has(item.identityKey))) {
         impactedSessionIds.add(targetSessionId)
       }
     }
@@ -4834,6 +4995,11 @@ function ExportPage() {
     const endIndex = Number.isFinite(range?.endIndex) ? Math.max(startIndex, Math.floor(range.endIndex)) : startIndex
     sessionMediaMetricVisibleRangeRef.current = { startIndex, endIndex }
     sessionMutualFriendsVisibleRangeRef.current = { startIndex, endIndex }
+    setContactsVisibleRange(prev => (
+      prev.startIndex === startIndex && prev.endIndex === endIndex
+        ? prev
+        : { startIndex, endIndex }
+    ))
     if (isLoadingSessionCountsRef.current || !isSessionCountStageReady) return
     const visibleTargets = collectVisibleSessionMetricTargets(filteredContacts)
     if (visibleTargets.length === 0) return
@@ -5037,7 +5203,18 @@ function ExportPage() {
     const items = sessionMutualFriendsDialogMetric?.items || []
     const keyword = sessionMutualFriendsSearch.trim().toLowerCase()
     if (!keyword) return items
-    return items.filter(item => item.name.toLowerCase().includes(keyword))
+    return items.filter((item) => {
+      const haystack = [
+        item.name,
+        item.remark,
+        item.wechatId,
+        item.wxid,
+        item.username
+      ]
+        .map(value => String(value || '').toLowerCase())
+        .join(' ')
+      return haystack.includes(keyword)
+    })
   }, [sessionMutualFriendsDialogMetric, sessionMutualFriendsSearch])
 
   const applySessionDetailStats = useCallback((
@@ -5618,7 +5795,7 @@ function ExportPage() {
   const taskCenterAlertCount = taskRunningCount + taskQueuedCount
   const hasFilteredContacts = filteredContacts.length > 0
   const contactsTableMinWidth = useMemo(() => {
-    const baseWidth = 24 + 34 + 44 + 280 + 120 + (4 * 72) + 140 + (8 * 12)
+    const baseWidth = 24 + 34 + 44 + 160 + 120 + (4 * 72) + (7 * 12)
     const snsWidth = shouldShowSnsColumn ? 72 + 12 : 0
     const mutualFriendsWidth = shouldShowMutualFriendsColumn ? 72 + 12 : 0
     return baseWidth + snsWidth + mutualFriendsWidth
@@ -5814,11 +5991,6 @@ function ExportPage() {
     const canExport = Boolean(matchedSession?.hasSession)
     const isSessionBindingPending = !matchedSession && (isLoading || isSessionEnriching)
     const checked = canExport && selectedSessions.has(contact.username)
-    const isRunning = canExport && runningSessionIds.has(contact.username)
-    const isQueued = canExport && queuedSessionIds.has(contact.username)
-    const recentExportTimestamp = lastExportBySession[contact.username]
-    const hasRecentExport = canExport && Boolean(recentExportTimestamp)
-    const recentExportTime = hasRecentExport ? formatRecentExportTime(recentExportTimestamp, nowTick) : ''
     const countedMessages = normalizeMessageCount(sessionMessageCounts[contact.username])
     const hintedMessages = normalizeMessageCount(matchedSession?.messageCountHint)
     const displayedMessageCount = countedMessages ?? hintedMessages
@@ -5995,47 +6167,14 @@ function ExportPage() {
               )}
             </div>
           )}
-          <div className="row-action-cell">
-            <div className={`row-action-main ${hasRecentExport ? '' : 'single-line'}`.trim()}>
-              <div className={`row-export-action-stack ${hasRecentExport ? '' : 'single-line'}`.trim()}>
-                <button
-                  type="button"
-                  className={`row-export-link ${isRunning ? 'state-running' : ''} ${!canExport ? 'state-disabled' : ''}`}
-                  disabled={!canExport || isRunning}
-                  onClick={() => {
-                    if (!matchedSession || !matchedSession.hasSession) return
-                    openSingleExport({
-                      ...matchedSession,
-                      displayName: contact.displayName || matchedSession.displayName || matchedSession.username
-                    })
-                  }}
-                >
-                  {!canExport ? '暂无会话' : isRunning ? '导出中...' : isQueued ? '排队中' : '单会话导出'}
-                </button>
-                {hasRecentExport && <span className="row-export-time">{recentExportTime}</span>}
-              </div>
-              <button
-                className={`row-detail-btn ${showSessionDetailPanel && sessionDetail?.wxid === contact.username ? 'active' : ''}`}
-                onClick={() => openSessionDetail(contact.username)}
-              >
-                详情
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     )
   }, [
-    lastExportBySession,
-    nowTick,
     openContactSnsTimeline,
     openSessionDetail,
     openSessionMutualFriendsDialog,
-    openSingleExport,
-    queuedSessionIds,
-    runningSessionIds,
     selectedSessions,
-    sessionDetail?.wxid,
     sessionContentMetrics,
     sessionMutualFriendsMetrics,
     sessionLoadTraceMap,
@@ -6049,6 +6188,77 @@ function ExportPage() {
     snsUserPostCounts,
     snsUserPostCountsStatus,
     toggleSelectSession
+  ])
+  const visibleContactsForActionRail = useMemo(() => {
+    if (!hasFilteredContacts || contactsVisibleRange.endIndex < contactsVisibleRange.startIndex || contactsVisibleRange.endIndex < 0) return []
+    const startIndex = Math.max(0, Math.min(filteredContacts.length - 1, contactsVisibleRange.startIndex))
+    const endIndex = Math.max(startIndex, Math.min(filteredContacts.length - 1, contactsVisibleRange.endIndex))
+    if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex) || endIndex < startIndex) return []
+    return filteredContacts.slice(startIndex, endIndex + 1).map((contact, offset) => {
+      const index = startIndex + offset
+      return {
+        contact,
+        index,
+        top: (index * CONTACTS_ROW_HEIGHT) - contactsListScrollTop
+      }
+    })
+  }, [contactsListScrollTop, contactsVisibleRange.endIndex, contactsVisibleRange.startIndex, filteredContacts, hasFilteredContacts])
+  const renderContactActionRailItem = useCallback((contact: ContactInfo, index: number, top: number) => {
+    const matchedSession = sessionRowByUsername.get(contact.username)
+    const canExport = Boolean(matchedSession?.hasSession)
+    const checked = canExport && selectedSessions.has(contact.username)
+    const isRunning = canExport && runningSessionIds.has(contact.username)
+    const isQueued = canExport && queuedSessionIds.has(contact.username)
+    const recentExportTimestamp = lastExportBySession[contact.username]
+    const hasRecentExport = canExport && Boolean(recentExportTimestamp)
+    const recentExportTime = hasRecentExport ? formatRecentExportTime(recentExportTimestamp, nowTick) : ''
+
+    return (
+      <div
+        key={contact.username}
+        className={`contacts-action-rail-row ${checked ? 'selected' : ''}`}
+        style={{ top: `${top}px` }}
+        data-index={index}
+      >
+        <div className="contacts-action-rail-card">
+          <div className={`row-action-main ${hasRecentExport ? '' : 'single-line'}`.trim()}>
+            <div className={`row-export-action-stack ${hasRecentExport ? '' : 'single-line'}`.trim()}>
+              <button
+                type="button"
+                className={`row-export-link ${isRunning ? 'state-running' : ''} ${!canExport ? 'state-disabled' : ''}`}
+                disabled={!canExport || isRunning}
+                onClick={() => {
+                  if (!matchedSession || !matchedSession.hasSession) return
+                  openSingleExport({
+                    ...matchedSession,
+                    displayName: contact.displayName || matchedSession.displayName || matchedSession.username
+                  })
+                }}
+              >
+                {!canExport ? '暂无会话' : isRunning ? '导出中...' : isQueued ? '排队中' : '单会话导出'}
+              </button>
+              {hasRecentExport && <span className="row-export-time">{recentExportTime}</span>}
+            </div>
+            <button
+              className={`row-detail-btn ${showSessionDetailPanel && sessionDetail?.wxid === contact.username ? 'active' : ''}`}
+              onClick={() => openSessionDetail(contact.username)}
+            >
+              详情
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }, [
+    lastExportBySession,
+    nowTick,
+    openSessionDetail,
+    openSingleExport,
+    queuedSessionIds,
+    runningSessionIds,
+    selectedSessions,
+    sessionDetail?.wxid,
+    sessionRowByUsername
   ])
   const handleContactsListWheelCapture = useCallback((event: WheelEvent<HTMLDivElement>) => {
     const deltaY = event.deltaY
@@ -6067,9 +6277,19 @@ function ExportPage() {
       window.scrollBy({ top: deltaY, behavior: 'auto' })
     }
   }, [isContactsListAtTop])
+  const handleContactsListScrollCapture = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof HTMLDivElement)) return
+    const nextScrollTop = Math.max(0, target.scrollTop)
+    setContactsListScrollTop(prev => (
+      Math.abs(prev - nextScrollTop) > 1 ? nextScrollTop : prev
+    ))
+  }, [])
   useEffect(() => {
     if (hasFilteredContacts) return
     setIsContactsListAtTop(true)
+    setContactsListScrollTop(0)
+    setContactsVisibleRange({ startIndex: 0, endIndex: -1 })
   }, [hasFilteredContacts])
   const chooseExportFolder = useCallback(async () => {
     const result = await window.electronAPI.dialog.openFile({
@@ -6481,18 +6701,24 @@ function ExportPage() {
                   <div
                     className="contacts-list"
                     onWheelCapture={handleContactsListWheelCapture}
+                    onScrollCapture={handleContactsListScrollCapture}
                   >
                     <Virtuoso
                       ref={contactsVirtuosoRef}
                       className="contacts-virtuoso"
                       data={filteredContacts}
                       computeItemKey={(_, contact) => contact.username}
-                      fixedItemHeight={76}
+                      fixedItemHeight={CONTACTS_ROW_HEIGHT}
                       itemContent={renderContactRow}
                       rangeChanged={handleContactsRangeChanged}
                       atTopStateChange={setIsContactsListAtTop}
                       overscan={420}
                     />
+                    <div className="contacts-action-rail">
+                      {visibleContactsForActionRail.map(({ contact, index, top }) => (
+                        renderContactActionRailItem(contact, index, top)
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -6790,15 +7016,15 @@ function ExportPage() {
                 </div>
 
                 <div className="session-mutual-friends-tip">
-                  打开桌面端微信，进入到这个人的朋友圈中，刷ta 的朋友圈，刷的越多这里的数据聚合越多
+                  打开桌面端微信进入对方朋友圈，刷得越多这里聚合得越全。已确认身份的共同好友会展示头像、备注、微信号；未确认的旧数据仅保留名字。
                 </div>
 
                 <div className="session-mutual-friends-toolbar">
                   <input
                     value={sessionMutualFriendsSearch}
                     onChange={(event) => setSessionMutualFriendsSearch(event.target.value)}
-                    placeholder="搜索共同好友"
-                    aria-label="搜索共同好友"
+                    placeholder="搜索共同好友（备注 / 微信号 / wxid）"
+                    aria-label="搜索共同好友（备注 / 微信号 / wxid）"
                   />
                 </div>
 
@@ -6810,20 +7036,48 @@ function ExportPage() {
                   ) : (
                     <div className="session-mutual-friends-list">
                       {filteredSessionMutualFriendsDialogItems.map((item, index) => (
-                        <div className="session-mutual-friends-row" key={`${sessionMutualFriendsDialogTarget.username}-${item.name}`}>
+                        <div className={`session-mutual-friends-row ${item.isConfirmed ? 'confirmed' : 'unconfirmed'}`} key={`${sessionMutualFriendsDialogTarget.username}-${item.key}`}>
                           <span className="session-mutual-friends-rank">{index + 1}</span>
-                          <span className="session-mutual-friends-name" title={item.name}>{item.name}</span>
-                          <span className={`session-mutual-friends-source ${item.direction}`}>
-                            {getSessionMutualFriendDirectionLabel(item.direction)}
-                          </span>
+                          <div className="session-mutual-friends-user">
+                            <Avatar
+                              src={item.avatarUrl}
+                              name={item.name}
+                              size={40}
+                              shape="rounded"
+                              className="session-mutual-friends-user-avatar"
+                            />
+                            <div className="session-mutual-friends-user-main">
+                              <div className="session-mutual-friends-user-head">
+                                <span className="session-mutual-friends-name" title={item.name}>{item.name}</span>
+                                <span className={`session-mutual-friends-source ${item.direction}`}>
+                                  {getSessionMutualFriendDirectionLabel(item.direction)}
+                                </span>
+                                {!item.isConfirmed && (
+                                  <span className="session-mutual-friends-identity-badge">身份未确认</span>
+                                )}
+                              </div>
+                              <div className="session-mutual-friends-identity" title={item.isConfirmed ? (item.wechatId ? `微信号: ${item.wechatId}` : '微信号: 未设置') : '仅从旧数据中解析到名字'}>
+                                {item.isConfirmed ? (
+                                  item.wechatId ? `微信号: ${item.wechatId}` : '微信号: 未设置'
+                                ) : (
+                                  '仅从旧数据中解析到名字'
+                                )}
+                              </div>
+                              <div className="session-mutual-friends-identity secondary" title={item.isConfirmed ? `wxid: ${item.wxid || item.username || ''}` : '没有可用的 wxid，未做自动匹配'}>
+                                {item.isConfirmed
+                                  ? `wxid: ${item.wxid || item.username || ''}`
+                                  : '没有可用的 wxid，未做自动匹配'}
+                              </div>
+                              <span
+                                className="session-mutual-friends-desc"
+                                title={describeSessionMutualFriendRelation(item, sessionMutualFriendsDialogTarget.displayName)}
+                              >
+                                {describeSessionMutualFriendRelation(item, sessionMutualFriendsDialogTarget.displayName)}
+                              </span>
+                            </div>
+                          </div>
                           <span className="session-mutual-friends-count">{item.totalCount.toLocaleString('zh-CN')}</span>
                           <span className="session-mutual-friends-latest">{formatYmdDateFromSeconds(item.latestTime)}</span>
-                          <span
-                            className="session-mutual-friends-desc"
-                            title={describeSessionMutualFriendRelation(item, sessionMutualFriendsDialogTarget.displayName)}
-                          >
-                            {describeSessionMutualFriendRelation(item, sessionMutualFriendsDialogTarget.displayName)}
-                          </span>
                         </div>
                       ))}
                     </div>
