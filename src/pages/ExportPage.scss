@@ -551,6 +551,7 @@
 }
 
 .global-export-controls {
+  --top-inline-control-height: 34px;
   flex: 0 1 980px;
   width: min(980px, 100%);
   background: var(--card-bg);
@@ -656,7 +657,7 @@
   }
 
   .more-export-settings-btn {
-    min-height: 38px;
+    min-height: var(--top-inline-control-height);
     border-radius: 10px;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
@@ -664,6 +665,7 @@
     padding: 0 14px;
     font-size: 12px;
     font-weight: 600;
+    line-height: 1;
     white-space: nowrap;
     cursor: pointer;
     transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -677,6 +679,7 @@
 
   .layout-trigger {
     width: 100%;
+    min-height: var(--top-inline-control-height);
     padding: 8px 10px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
