@@ -606,33 +606,13 @@ export class KeyService {
 
     const logs: string[] = []
 
-    onStatus?.('正在定位微信安装路径...', 0)
-    let wechatPath = await this.findWeChatInstallPath()
-    if (!wechatPath) {
-      const err = '未找到微信安装路径，请确认已安装PC微信'
+    onStatus?.('正在查找微信进程...', 0)
+    const pid = await this.findWeChatPid()
+    if (!pid) {
+      const err = '未找到微信进程，请先启动微信'
       onStatus?.(err, 2)
       return { success: false, error: err }
     }
-
-    onStatus?.('正在关闭微信以进行获取...', 0)
-    const closed = await this.killWeChatProcesses()
-    if (!closed) {
-      const err = '无法自动关闭微信，请手动退出后重试'
-      onStatus?.(err, 2)
-      return { success: false, error: err }
-    }
-
-    onStatus?.('正在启动微信...', 0)
-    const sub = spawn(wechatPath, {
-      detached: true,
-      stdio: 'ignore',
-      cwd: dirname(wechatPath)
-    })
-    sub.unref()
-
-    onStatus?.('等待微信界面就绪...', 0)
-    const pid = await this.waitForWeChatWindow()
-    if (!pid) return { success: false, error: '启动微信失败或等待界面就绪超时' }
 
     onStatus?.(`检测到微信窗口 (PID: ${pid})，正在获取...`, 0)
     onStatus?.('正在检测微信界面组件...', 0)

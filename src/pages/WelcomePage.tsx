@@ -8,6 +8,7 @@ import {
   FolderOpen, FolderSearch, KeyRound, ShieldCheck, Sparkles,
   UserRound, Wand2, Minus, X, HardDrive, RotateCcw
 } from 'lucide-react'
+import ConfirmDialog from '../components/ConfirmDialog'
 import './WelcomePage.scss'
 
 const steps = [
@@ -61,6 +62,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   const [imageKeyStatus, setImageKeyStatus] = useState('')
   const [isManualStartPrompt, setIsManualStartPrompt] = useState(false)
   const [imageKeyPercent, setImageKeyPercent] = useState<number | null>(null)
+  const [showDbKeyConfirm, setShowDbKeyConfirm] = useState(false)
 
   // 安全相关 state
   const [enableAuth, setEnableAuth] = useState(false)
@@ -123,6 +125,14 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   useEffect(() => {
     const removeDb = window.electronAPI.key.onDbKeyStatus((payload: { message: string; level: number }) => {
       setDbKeyStatus(payload.message)
+      if (payload.message.includes('现在可以登录') || payload.message.includes('Hook安装成功')) {
+        window.electronAPI.notification?.show({
+          title: 'WeFlow 准备就绪',
+          content: '现在可以登录微信了',
+          avatarUrl: './logo.png',
+          sessionId: 'weflow-system'
+        })
+      }
     })
     const removeImage = window.electronAPI.key.onImageKeyStatus((payload: { message: string, percent?: number }) => {
       let msg = payload.message;
@@ -187,6 +197,15 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     window.electronAPI.window.close()
   }
 
+  const validatePath = (path: string): string | null => {
+    if (!path) return null
+    // 检测中文字符和其他可能有问题的特殊字符
+    if (/[\u4e00-\u9fa5]/.test(path)) {
+      return '路径包含中文字符，请迁移至全英文目录'
+    }
+    return null
+  }
+
   const handleSelectPath = async () => {
     try {
       const result = await dialog.openFile({
@@ -195,8 +214,14 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       })
 
       if (!result.canceled && result.filePaths.length > 0) {
-        setDbPath(result.filePaths[0])
-        setError('')
+        const selectedPath = result.filePaths[0]
+        const validationError = validatePath(selectedPath)
+        if (validationError) {
+          setError(validationError)
+        } else {
+          setDbPath(selectedPath)
+          setError('')
+        }
       }
     } catch (e) {
       setError('选择目录失败')
@@ -210,8 +235,13 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     try {
       const result = await window.electronAPI.dbPath.autoDetect()
       if (result.success && result.path) {
-        setDbPath(result.path)
-        setError('')
+        const validationError = validatePath(result.path)
+        if (validationError) {
+          setError(validationError)
+        } else {
+          setDbPath(result.path)
+          setError('')
+        }
       } else {
         setError(result.error || '未能检测到数据库目录')
       }
@@ -287,6 +317,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
   const handleAutoGetDbKey = async () => {
     if (isFetchingDbKey) return
+    setShowDbKeyConfirm(true)
+  }
+
+  const handleDbKeyConfirm = async () => {
+    setShowDbKeyConfirm(false)
     setIsFetchingDbKey(true)
     setError('')
     setIsManualStartPrompt(false)
@@ -297,7 +332,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         setDecryptKey(result.key)
         setDbKeyStatus('密钥获取成功')
         setError('')
-        // 获取成功后自动扫描并填入 wxid
         await handleScanWxid(true)
       } else {
         if (result.error?.includes('未找到微信安装路径') || result.error?.includes('启动微信失败')) {
@@ -613,9 +647,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
                 </div>
 
                 <div className="field-hint">请选择微信-设置-存储位置对应的目录</div>
-                <div className="field-hint warning">
-                  目录路径不可包含中文，如有中文请先在微信中迁移至全英文目录
-                </div>
               </div>
             )}
 
@@ -705,7 +736,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
                   )}
                 </div>
 
-                {dbKeyStatus && <div className="status-message">{dbKeyStatus}</div>}
+                {dbKeyStatus && <div className={`status-message ${dbKeyStatus.includes('现在可以登录') || dbKeyStatus.includes('Hook安装成功') ? 'is-success' : ''}`}>{dbKeyStatus}</div>}
                 <div className="field-hint">点击自动获取后微信将重启，请留意弹窗提示</div>
               </div>
             )}
@@ -840,6 +871,16 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             )}
           </div>
         </div>
+
+        <ConfirmDialog
+          open={showDbKeyConfirm}
+          title="开始获取数据库密钥"
+          message={`当开始获取后 WeFlow 将会执行准备操作
+
+当 WeFlow 内的提示条变为绿色显示允许登录或看到来自WeFlow的登录通知时，登录你的微信或退出当前登录并重新登录。`}
+          onConfirm={handleDbKeyConfirm}
+          onCancel={() => setShowDbKeyConfirm(false)}
+        />
       </div>
     </div>
   )

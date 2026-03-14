@@ -41,6 +41,7 @@
 }
 
 .settings-page {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: min(1160px, calc(100vw - 96px));

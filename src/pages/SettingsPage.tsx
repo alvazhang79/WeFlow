@@ -557,24 +557,37 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
     }
   }
 
+  const validatePath = (path: string): string | null => {
+    if (!path) return null
+    if (/[\u4e00-\u9fa5]/.test(path)) {
+      return '路径包含中文字符，请迁移至全英文目录'
+    }
+    return null
+  }
+
   const handleAutoDetectPath = async () => {
     if (isDetectingPath) return
     setIsDetectingPath(true)
     try {
       const result = await window.electronAPI.dbPath.autoDetect()
       if (result.success && result.path) {
-        setDbPath(result.path)
-        await configService.setDbPath(result.path)
-        showMessage(`自动检测成功：${result.path}`, true)
+        const validationError = validatePath(result.path)
+        if (validationError) {
+          showMessage(validationError, false)
+        } else {
+          setDbPath(result.path)
+          await configService.setDbPath(result.path)
+          showMessage(`自动检测成功：${result.path}`, true)
 
-        const wxids = await window.electronAPI.dbPath.scanWxids(result.path)
-        setWxidOptions(wxids)
-        if (wxids.length === 1) {
-          await applyWxidSelection(wxids[0].wxid, {
-            toastText: `已检测到账号：${wxids[0].wxid}`
-          })
-        } else if (wxids.length > 1) {
-          setShowWxidSelect(true)
+          const wxids = await window.electronAPI.dbPath.scanWxids(result.path)
+          setWxidOptions(wxids)
+          if (wxids.length === 1) {
+            await applyWxidSelection(wxids[0].wxid, {
+              toastText: `已检测到账号：${wxids[0].wxid}`
+            })
+          } else if (wxids.length > 1) {
+            setShowWxidSelect(true)
+          }
         }
       } else {
         showMessage(result.error || '未能自动检测到数据库目录', false)
@@ -591,9 +604,14 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       const result = await dialog.openFile({ title: '选择微信数据库根目录', properties: ['openDirectory'] })
       if (!result.canceled && result.filePaths.length > 0) {
         const selectedPath = result.filePaths[0]
-        setDbPath(selectedPath)
-        await configService.setDbPath(selectedPath)
-        showMessage('已选择数据库目录', true)
+        const validationError = validatePath(selectedPath)
+        if (validationError) {
+          showMessage(validationError, false)
+        } else {
+          setDbPath(selectedPath)
+          await configService.setDbPath(selectedPath)
+          showMessage('已选择数据库目录', true)
+        }
       }
     } catch (e: any) {
       showMessage('选择目录失败', false)
@@ -1287,7 +1305,6 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       <div className="form-group">
         <label>数据库根目录</label>
         <span className="form-hint">xwechat_files 目录</span>
-        <span className="form-hint" style={{ color: '#ff6b6b' }}> 目录路径不可包含中文，如有中文请去微信-设置-存储位置点击更改，迁移至全英文目录</span>
         <input
           type="text"
           placeholder="例如: C:\Users\xxx\Documents\xwechat_files"

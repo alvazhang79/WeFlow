@@ -5202,6 +5202,24 @@ function MessageBubble({
   const [emojiError, setEmojiError] = useState(false)
   const [emojiLoading, setEmojiLoading] = useState(false)
 
+  // 缓存相关的 state 必须在所有 Hooks 之前声明
+  const cacheKey = message.emojiMd5 || message.emojiCdnUrl || ''
+  const [emojiLocalPath, setEmojiLocalPath] = useState<string | undefined>(
+    () => emojiDataUrlCache.get(cacheKey) || message.emojiLocalPath
+  )
+  const imageCacheKey = message.imageMd5 || message.imageDatName || `local:${message.localId}`
+  const [imageLocalPath, setImageLocalPath] = useState<string | undefined>(
+    () => imageDataUrlCache.get(imageCacheKey)
+  )
+  const voiceCacheKey = `voice:${message.localId}`
+  const [voiceDataUrl, setVoiceDataUrl] = useState<string | undefined>(
+    () => voiceDataUrlCache.get(voiceCacheKey)
+  )
+  const voiceTranscriptCacheKey = `voice-transcript:${message.localId}`
+  const [voiceTranscript, setVoiceTranscript] = useState<string | undefined>(
+    () => voiceTranscriptCache.get(voiceTranscriptCacheKey)
+  )
+
   // State variables...
   const [imageError, setImageError] = useState(false)
   const [imageLoading, setImageLoading] = useState(false)
@@ -5281,24 +5299,6 @@ function MessageBubble({
     }
     loadConfig()
   }, [])
-
-  // 从缓存获取表情包 data URL
-  const cacheKey = message.emojiMd5 || message.emojiCdnUrl || ''
-  const [emojiLocalPath, setEmojiLocalPath] = useState<string | undefined>(
-    () => emojiDataUrlCache.get(cacheKey) || message.emojiLocalPath
-  )
-  const imageCacheKey = message.imageMd5 || message.imageDatName || `local:${message.localId}`
-  const [imageLocalPath, setImageLocalPath] = useState<string | undefined>(
-    () => imageDataUrlCache.get(imageCacheKey)
-  )
-  const voiceCacheKey = `voice:${message.localId}`
-  const [voiceDataUrl, setVoiceDataUrl] = useState<string | undefined>(
-    () => voiceDataUrlCache.get(voiceCacheKey)
-  )
-  const voiceTranscriptCacheKey = `voice-transcript:${message.localId}`
-  const [voiceTranscript, setVoiceTranscript] = useState<string | undefined>(
-    () => voiceTranscriptCache.get(voiceTranscriptCacheKey)
-  )
 
   const formatTime = (timestamp: number): string => {
     if (!Number.isFinite(timestamp) || timestamp <= 0) return '未知时间'
