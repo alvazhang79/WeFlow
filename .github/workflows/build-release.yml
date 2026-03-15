@@ -1,0 +1,104 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*' # Push events to tags like v1.0.0 will also trigger a workflow run
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest] # Build for Windows, macOS, and Linux
+        # Include a specific Electron version if necessary
+        # electron-version: [39.2.7]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Use a Node.js version compatible with Electron 39
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build and release Electron app
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # CSC_LINK: ${{ secrets.CSC_LINK }} # Optional: for code signing on macOS/Windows
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }} # Optional: for code signing
+        run: npm run build # This script already includes electron-builder
+
+      - name: Upload artifact (Windows)
+        if: startsWith(runner.os, 'Windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeFlow-Windows
+          path: release/*.exe # Adjust path to your Windows installer
+
+      - name: Upload artifact (macOS)
+        if: startsWith(runner.os, 'macOS')
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeFlow-macOS
+          path: release/*.dmg # Adjust path to your macOS installer
+
+      - name: Upload artifact (Linux)
+        if: startsWith(runner.os, 'Linux')
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeFlow-Linux
+          path: release/*.AppImage # Adjust path to your Linux AppImage
+
+      # Create a GitHub Release if a tag is pushed
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }} # This token is provided by Actions
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset (Windows)
+        if: startsWith(github.ref, 'refs/tags/v') && startsWith(runner.os, 'Windows')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/*.exe
+          asset_name: WeFlow-Windows-${{ github.ref_name }}.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
+
+      - name: Upload Release Asset (macOS)
+        if: startsWith(github.ref, 'refs/tags/v') && startsWith(runner.os, 'macOS')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/*.dmg
+          asset_name: WeFlow-macOS-${{ github.ref_name }}.dmg
+          asset_content_type: application/x-apple-diskimage
+
+      - name: Upload Release Asset (Linux)
+        if: startsWith(github.ref, 'refs/tags/v') && startsWith(runner.os, 'Linux')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/*.AppImage
+          asset_name: WeFlow-Linux-${{ github.ref_name }}.AppImage
+          asset_content_type: application/x-executable
