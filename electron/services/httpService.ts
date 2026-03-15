@@ -103,6 +103,8 @@ class HttpService {
   private running: boolean = false
   private connections: Set<import('net').Socket> = new Set()
   private connectionMutex: boolean = false
+  private allowedIp: string = '127.0.0.1' // 默认只允许本地访问
+  private authToken: string | null = null // 默认不启用 token 认证
 
   constructor() {
     this.configService = ConfigService.getInstance()
@@ -111,12 +113,22 @@ class HttpService {
   /**
    * 启动 HTTP 服务
    */
-  async start(port: number = 5031): Promise<{ success: boolean; port?: number; error?: string }> {
+  async start(port: number = 5031, allowedIp?: string, authToken?: string): Promise<{ success: boolean; port?: number; error?: string }> {
     if (this.running && this.server) {
       return { success: true, port: this.port }
     }
 
     this.port = port
+    
+    // 设置 IP 限制
+    if (allowedIp !== undefined) {
+      this.allowedIp = allowedIp
+    }
+    
+    // 设置认证 token
+    if (authToken !== undefined) {
+      this.authToken = authToken
+    }
 
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res))
@@ -150,9 +162,12 @@ class HttpService {
         }
       })
 
-      this.server.listen(this.port, '127.0.0.1', () => {
+      // 根据 allowedIp 参数决定绑定地址
+      const bindAddress = this.allowedIp === '0.0.0.0' ? '0.0.0.0' : (this.allowedIp || '127.0.0.1')
+      
+      this.server.listen(this.port, bindAddress, () => {
         this.running = true
-        console.log(`[HttpService] HTTP API server started on http://127.0.0.1:${this.port}`)
+        console.log(`[HttpService] HTTP API server started on http://${bindAddress}:${this.port}`)
         resolve({ success: true, port: this.port })
       })
     })
@@ -211,9 +226,130 @@ class HttpService {
   }
 
   /**
+   * 检查客户端 IP 是否被允许访问
+   */
+  private isIpAllowed(clientIp: string): boolean {
+    if (this.allowedIp === '0.0.0.0') {
+      // 0.0.0.0 表示不限制 IP 访问
+      return true
+    }
+
+    // 解析 allowedIp，支持 CIDR 格式和单个 IP
+    if (this.allowedIp.includes('/')) {
+      // CIDR 格式，例如 192.168.1.0/24
+      const [network, prefix] = this.allowedIp.split('/')
+      const prefixNum = parseInt(prefix, 10)
+      
+      try {
+        const clientOctets = clientIp.split('.').map(Number)
+        const networkOctets = network.split('.').map(Number)
+        
+        if (clientOctets.length !== 4 || networkOctets.length !== 4) {
+          return false
+        }
+        
+        // 将 IP 转换为二进制进行比较
+        let clientBinary = 0
+        let networkBinary = 0
+        for (let i = 0; i < 4; i++) {
+          clientBinary = (clientBinary << 8) + clientOctets[i]
+          networkBinary = (networkBinary << 8) + networkOctets[i]
+        }
+        
+        const mask = ~((1 << (32 - prefixNum)) - 1)
+        return (clientBinary & mask) === (networkBinary & mask)
+      } catch (e) {
+        console.error('[HttpService] Error parsing CIDR:', e)
+        return false
+      }
+    } else {
+      // 单个 IP 地址或通配符格式
+      if (this.allowedIp === clientIp) {
+        return true
+      }
+      
+      // 支持通配符，例如 192.168.*.*
+      const allowedPattern = this.allowedIp.replace(/\*/g, '(.*)')
+      const regex = new RegExp(`^${allowedPattern}$`)
+      return regex.test(clientIp)
+    }
+  }
+
+  /**
+   * 检查请求是否包含有效的认证 token
+   */
+  private isTokenValid(req: http.IncomingMessage): boolean {
+    if (!this.authToken) {
+      // 如果未设置 token，则不需要认证
+      return true
+    }
+
+    // 从请求头中获取 token
+    const authHeader = req.headers.authorization
+    if (authHeader && typeof authHeader === 'string') {
+      // 检查是否为 Bearer token 格式
+      if (authHeader.startsWith('Bearer ')) {
+        return authHeader.substring(7).trim() === this.authToken
+      }
+      // 或者直接比较整个值
+      if (authHeader === this.authToken) {
+        return true
+      }
+    }
+
+    // 也可以从查询参数中获取 token
+    const url = new URL(req.url || '/', `http://localhost:${this.port}`)
+    const tokenParam = url.searchParams.get('token')
+    if (tokenParam && tokenParam === this.authToken) {
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * 获取客户端真实 IP 地址
+   */
+  private getClientIp(req: http.IncomingMessage): string {
+    // 检查 X-Forwarded-For 头
+    const forwarded = req.headers['x-forwarded-for'] as string
+    if (forwarded) {
+      // 可能有多个 IP，取第一个
+      const ips = forwarded.split(',')[0].trim()
+      return ips.split(':')[0] // 去掉端口号
+    }
+    
+    // 检查 X-Real-IP 头
+    const realIp = req.headers['x-real-ip'] as string
+    if (realIp) {
+      return realIp.split(':')[0]
+    }
+    
+    // 使用远程地址
+    const remoteAddr = req.socket.remoteAddress || '127.0.0.1'
+    // 如果是 IPv6 的本地地址，转换为 IPv4
+    return remoteAddr.replace(/^::ffff:/, '').replace(/^::1$/, '127.0.0.1')
+  }
+
+  /**
    * 处理 HTTP 请求
    */
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // 获取客户端 IP
+    const clientIp = this.getClientIp(req)
+    
+    // 检查 IP 是否被允许访问
+    if (!this.isIpAllowed(clientIp)) {
+      this.sendError(res, 403, `IP ${clientIp} is not allowed to access this API`)
+      return
+    }
+    
+    // 检查 token 认证
+    if (!this.isTokenValid(req)) {
+      this.sendError(res, 401, 'Invalid or missing authentication token')
+      return
+    }
+    
     // 设置 CORS 头
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -1138,6 +1274,34 @@ class HttpService {
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.writeHead(200)
     res.end(JSON.stringify(data, null, 2))
+  }
+
+  /**
+   * 设置允许访问的 IP 地址或 IP 段
+   */
+  setAllowedIp(ip: string): void {
+    this.allowedIp = ip
+    console.log(`[HttpService] Allowed IP updated to: ${ip}`)
+  }
+
+  /**
+   * 设置认证 token
+   */
+  setAuthToken(token: string): void {
+    this.authToken = token
+    console.log(`[HttpService] Authentication token updated`)
+  }
+
+  /**
+   * 获取当前配置信息
+   */
+  getConfig(): { allowedIp: string; hasAuthToken: boolean; port: number; running: boolean } {
+    return {
+      allowedIp: this.allowedIp,
+      hasAuthToken: !!this.authToken,
+      port: this.port,
+      running: this.running
+    }
   }
 
   /**

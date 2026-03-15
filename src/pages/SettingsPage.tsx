@@ -157,6 +157,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
   const [httpApiMediaExportPath, setHttpApiMediaExportPath] = useState('')
   const [isTogglingApi, setIsTogglingApi] = useState(false)
   const [showApiWarning, setShowApiWarning] = useState(false)
+  const [httpApiAllowedIp, setHttpApiAllowedIp] = useState('127.0.0.1') // 新增：API 允许访问的 IP
+  const [httpAuthToken, setHttpAuthToken] = useState('') // 新增：API 认证 Token
+  const [showAuthToken, setShowAuthToken] = useState(false) // 新增：控制 Token 显示/隐藏
+  const [hasConfiguredAuthToken, setHasConfiguredAuthToken] = useState(false) // 新增：判断是否已配置 Token
 
   const isClearingCache = isClearingAnalyticsCache || isClearingImageCache || isClearingAllCache
 
@@ -333,6 +337,15 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
 
 
       if (savedWhisperModelDir) setWhisperModelDir(savedWhisperModelDir)
+
+      // 加载 HTTP API 配置
+      const httpApiConfig = await window.electronAPI.http.getConfig()
+      setHttpApiAllowedIp(httpApiConfig.allowedIp)
+      // 如果有 Token，只显示掩码，不显示实际值
+      setHttpAuthToken(httpApiConfig.hasAuthToken ? '****************' : '')
+      setHasConfiguredAuthToken(httpApiConfig.hasAuthToken)
+      setHttpApiPort(httpApiConfig.port)
+      setHttpApiRunning(httpApiConfig.running)
 
 
     } catch (e: any) {
@@ -1651,7 +1664,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
     setShowApiWarning(false)
     setIsTogglingApi(true)
     try {
-      const result = await window.electronAPI.http.start(httpApiPort)
+      const result = await window.electronAPI.http.start(httpApiPort, httpApiAllowedIp, httpAuthToken)
       if (result.success) {
         setHttpApiRunning(true)
         if (result.port) setHttpApiPort(result.port)
@@ -1672,11 +1685,23 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
     showMessage('已复制 API 地址', true)
   }
 
+  const generateRandomToken = (): string => {
+    // 生成一个足够长的随机字符串作为 Token
+    const length = 32 // 例如 32 个字符
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0987654321'
+    let result = ''
+    const charactersLength = characters.length
+    for (let i = 0; i < length; i++) {
+      result += characters.charAt(Math.floor(Math.random() * charactersLength))
+    }
+    return result
+  }
+
   const renderApiTab = () => (
     <div className="tab-content">
       <div className="form-group">
         <label>HTTP API 服务</label>
-        <span className="form-hint">启用后可通过 HTTP 接口查询消息数据（仅限本机访问）</span>
+        <span className="form-hint">启用后可通过 HTTP 接口查询消息数据。</span>
         <div className="log-toggle-line">
           <span className="log-status">
             {httpApiRunning ? '运行中' : '已停止'}
@@ -1701,22 +1726,98 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
           className="field-input"
           value={httpApiPort}
           onChange={(e) => setHttpApiPort(parseInt(e.target.value, 10) || 5031)}
-          disabled={httpApiRunning}
+          disabled={httpApiRunning || isTogglingApi}
           style={{ width: 120 }}
           min={1024}
           max={65535}
         />
       </div>
 
+      <div className="form-group">
+        <label>允许访问的 IP 地址/段</label>
+        <span className="form-hint">例如: `127.0.0.1` (仅本机), `192.168.1.0/24` (指定网段), `0.0.0.0` (不限制 IP 访问)</span>
+        <div className="input-with-button">
+          <input
+            type="text"
+            className="field-input"
+            value={httpApiAllowedIp}
+            onChange={(e) => setHttpApiAllowedIp(e.target.value.trim())}
+            placeholder="例如: 127.0.0.1 或 0.0.0.0"
+            disabled={httpApiRunning || isTogglingApi}
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                await window.electronAPI.http.setAllowedIp(httpApiAllowedIp)
+                showMessage('IP 访问设置已保存', true)
+              } catch (e: any) {
+                showMessage(`保存 IP 设置失败: ${e}`, false)
+              }
+            }}
+            disabled={httpApiRunning || isTogglingApi}
+          >
+            保存
+          </button>
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label>认证 Token <span className="optional">(可选)</span></label>
+        <span className="form-hint">启用后，所有 API 请求必须携带此 Token 进行认证。留空表示不启用。</span>
+        <div className="input-with-button">
+          <input
+            type={showAuthToken ? 'text' : 'password'}
+            className="field-input"
+            value={httpAuthToken}
+            onChange={(e) => setHttpAuthToken(e.target.value.trim())}
+            placeholder="留空表示不启用 Token 认证"
+            disabled={httpApiRunning || isTogglingApi}
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowAuthToken(!showAuthToken)}
+            title={showAuthToken ? '隐藏' : '显示'}
+            disabled={httpApiRunning || isTogglingApi}
+          >
+            {showAuthToken ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setHttpAuthToken(generateRandomToken())}
+            title="生成随机 Token"
+            disabled={httpApiRunning || isTogglingApi}
+          >
+            <KeyRound size={16} />
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                await window.electronAPI.http.setAuthToken(httpAuthToken)
+                setHasConfiguredAuthToken(!!httpAuthToken)
+                showMessage('Token 设置已保存', true)
+              } catch (e: any) {
+                showMessage(`保存 Token 失败: ${e}`, false)
+              }
+            }}
+            disabled={httpApiRunning || isTogglingApi}
+          >
+            保存
+          </button>
+        </div>
+        {hasConfiguredAuthToken && !httpAuthToken && <div className="form-hint warning">Token 认证已配置但当前输入框为空，表示Token已清空，Token认证将被禁用。</div>}
+      </div>
+
       {httpApiRunning && (
         <div className="form-group">
-          <label>API 地址</label>
-          <span className="form-hint">使用以下地址访问 API</span>
+          <label>API 访问端点</label>
+          <span className="form-hint">使用以下地址访问 API (可能需要 Token)</span>
           <div className="api-url-display">
             <input
               type="text"
               className="field-input"
-              value={`http://127.0.0.1:${httpApiPort}`}
+              value={`http://${httpApiAllowedIp === '0.0.0.0' ? '您的本机IP' : httpApiAllowedIp}:${httpApiPort}/api/v1/messages`}
               readOnly
             />
             <button className="btn btn-secondary" onClick={handleCopyApiUrl} title="复制">
@@ -1727,17 +1828,6 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       )}
 
       {/* API 安全警告弹窗 */}
-      <div className="form-group">
-        <label>默认媒体导出目录</label>
-        <span className="form-hint">`/api/v1/messages` 在开启 `media=1` 时会把媒体保存到这里</span>
-        <input
-          type="text"
-          className="field-input"
-          value={httpApiMediaExportPath || '未获取到目录'}
-          readOnly
-        />
-      </div>
-
       {showApiWarning && (
         <div className="modal-overlay" onClick={() => setShowApiWarning(false)}>
           <div className="api-warning-modal" onClick={(e) => e.stopPropagation()}>
@@ -1746,19 +1836,23 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
               <h3>安全提示</h3>
             </div>
             <div className="modal-body">
-              <p className="warning-text">启用 HTTP API 服务后，本机上的其他程序可通过接口访问您的聊天记录数据。</p>
+              <p className="warning-text">启用 HTTP API 服务后，其他程序可通过接口访问您的聊天记录数据。</p>
               <div className="warning-list">
                 <div className="warning-item">
                   <span className="bullet">•</span>
-                  <span>请确保您了解此功能的用途</span>
+                  <span>**IP 限制**：目前设置为 `{httpApiAllowedIp}`。`0.0.0.0` 表示任何 IP 均可访问，请谨慎。</span>
                 </div>
                 <div className="warning-item">
                   <span className="bullet">•</span>
-                  <span>不要在公共或不信任的网络环境下使用</span>
+                  <span>**Token 认证**：{hasConfiguredAuthToken ? '已配置，访问 API 需携带有效 Token。' : '未配置，任何知道接口的用户均可访问。'}</span>
                 </div>
                 <div className="warning-item">
                   <span className="bullet">•</span>
-                  <span>此功能仅供高级用户或开发者使用</span>
+                  <span>请确保您了解此功能的用途，不要在公共或不信任的网络环境下使用。</span>
+                </div>
+                <div className="warning-item">
+                  <span className="bullet">•</span>
+                  <span>此功能仅供高级用户或开发者使用。</span>
                 </div>
               </div>
             </div>
@@ -1773,6 +1867,16 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
           </div>
         </div>
       )}
+      <div className="form-group">
+        <label>默认媒体导出目录</label>
+        <span className="form-hint">`/api/v1/messages` 在开启 `media=1` 时会把媒体保存到这里</span>
+        <input
+          type="text"
+          className="field-input"
+          value={httpApiMediaExportPath || '未获取到目录'}
+          readOnly
+        />
+      </div>
     </div>
   )
 
