@@ -2325,8 +2325,8 @@ function registerIpcHandlers() {
   })
 
   // HTTP API 服务
-  ipcMain.handle('http:start', async (_, port?: number) => {
-    return httpService.start(port || 5031)
+  ipcMain.handle('http:start', async (_, port?: number, allowedIp?: string, authToken?: string) => {
+    return httpService.start(port || 5031, allowedIp, authToken)
   })
 
   ipcMain.handle('http:stop', async () => {
@@ -2340,6 +2340,28 @@ function registerIpcHandlers() {
       port: httpService.getPort(),
       mediaExportPath: httpService.getDefaultMediaExportPath()
     }
+  })
+
+  ipcMain.handle('http:setAllowedIp', async (_, ip: string) => {
+    try {
+      httpService.setAllowedIp(ip)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('http:setAuthToken', async (_, token: string) => {
+    try {
+      httpService.setAuthToken(token)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('http:getConfig', async () => {
+    return httpService.getConfig()
   })
 
 }

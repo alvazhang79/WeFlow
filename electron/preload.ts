@@ -390,8 +390,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // HTTP API 服务
   http: {
-    start: (port?: number) => ipcRenderer.invoke('http:start', port),
+    start: (port?: number, allowedIp?: string, authToken?: string) => ipcRenderer.invoke('http:start', port, allowedIp, authToken),
     stop: () => ipcRenderer.invoke('http:stop'),
-    status: () => ipcRenderer.invoke('http:status')
+    status: () => ipcRenderer.invoke('http:status'),
+    setAllowedIp: (ip: string) => ipcRenderer.invoke('http:setAllowedIp', ip),
+    setAuthToken: (token: string) => ipcRenderer.invoke('http:setAuthToken', token),
+    getConfig: () => ipcRenderer.invoke('http:getConfig')
   }
 })

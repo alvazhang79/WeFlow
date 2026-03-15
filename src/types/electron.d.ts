@@ -808,9 +808,12 @@ export interface ElectronAPI {
     getLogs: () => Promise<string[]>
   }
   http: {
-    start: (port?: number) => Promise<{ success: boolean; port?: number; error?: string }>
+    start: (port?: number, allowedIp?: string, authToken?: string) => Promise<{ success: boolean; port?: number; error?: string }>
     stop: () => Promise<{ success: boolean }>
     status: () => Promise<{ running: boolean; port: number; mediaExportPath: string }>
+    setAllowedIp: (ip: string) => Promise<{ success: boolean; error?: string }>
+    setAuthToken: (token: string) => Promise<{ success: boolean; error?: string }>
+    getConfig: () => Promise<{ allowedIp: string; hasAuthToken: boolean; port: number; running: boolean }>
   }
 }
 
