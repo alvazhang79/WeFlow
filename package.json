@@ -1,8 +1,6 @@
-{ "name": "weflow", "version": "5.0.7",
+{
+  "name": "weflow",
   "version": "5.0.7",
-=======
-  "version": "5.0.6",
->>>>>>> origin/main
   "description": "WeFlow",
   "main": "dist-electron/main.js",
   "author": "cc",
@@ -71,18 +69,6 @@
     "artifactName": "${productName}-${version}-Setup.${ext}",
     "directories": {
       "output": "release"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.utilities",
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false,
-      "entitlements": "electron/entitlements.mac.plist",
-      "entitlementsInherit": "electron/entitlements.mac.plist",
-      "icon": "resources/icon.icns"
     },
     "win": {
       "target": [
