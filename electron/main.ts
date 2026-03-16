@@ -2585,7 +2585,15 @@ app.whenReady().then(async () => {
   // 自动启动 HTTP API 服务（如果上次退出时已启用）
   try {
     const httpApiEnabled = configService.get('httpApiEnabled')
-    if (httpApiEnabled) {
+    
+    // 清理可能存在的无效 Token 配置（如被错误保存的掩码）
+    const savedAuthToken = configService.get('httpApiAuthToken')
+    if (savedAuthToken === '****************' || !savedAuthToken) {
+      // Token 为掩码或空，需要用户重新设置
+      configService.set('httpApiEnabled', false)
+      configService.set('httpApiAuthToken', '')
+      console.log('[Startup] Invalid token detected, cleared token config.')
+    } else if (httpApiEnabled) {
       const savedAllowedIp = configService.get('httpApiAllowedIp') || '127.0.0.1'
       const savedAuthToken = configService.get('httpApiAuthToken') || ''
       const savedPort = configService.get('httpApiPort') || 5031
