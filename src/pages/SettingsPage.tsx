@@ -341,7 +341,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       // 加载 HTTP API 配置
       const httpApiConfig = await window.electronAPI.http.getConfig()
       setHttpApiAllowedIp(httpApiConfig.allowedIp)
-      // 如果有 Token，设置标记但不显示掩码，让用户重新输入
+      // 若已配置 Token，不回填输入框（避免覆盖/误清空）
       setHttpAuthToken('')
       setHasConfiguredAuthToken(httpApiConfig.hasAuthToken)
       setHttpApiPort(httpApiConfig.port)
@@ -1794,13 +1794,19 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             className="btn btn-secondary"
             onClick={async () => {
               try {
+                const trimmed = httpAuthToken.trim()
                 // 防止保存掩码 "****************"
-                if (httpAuthToken === '****************') {
+                if (trimmed === '****************') {
                   showMessage('Token 未修改，无需保存', true)
                   return
                 }
-                await window.electronAPI.http.setAuthToken(httpAuthToken)
-                setHasConfiguredAuthToken(!!httpAuthToken)
+                // 空值不保存，避免误清空
+                if (!trimmed) {
+                  showMessage('未输入 Token，未保存（如需清空请点击“清空”）', false)
+                  return
+                }
+                await window.electronAPI.http.setAuthToken(trimmed)
+                setHasConfiguredAuthToken(!!trimmed)
                 showMessage('Token 设置已保存', true)
               } catch (e: any) {
                 showMessage(`保存 Token 失败: ${e}`, false)
@@ -1810,8 +1816,28 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
           >
             保存
           </button>
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                await window.electronAPI.http.setAuthToken('')
+                setHttpAuthToken('')
+                setHasConfiguredAuthToken(false)
+                showMessage('Token 已清空', true)
+              } catch (e: any) {
+                showMessage(`清空 Token 失败: ${e}`, false)
+              }
+            }}
+            disabled={httpApiRunning || isTogglingApi}
+          >
+            清空
+          </button>
         </div>
-        {hasConfiguredAuthToken && !httpAuthToken && <div className="form-hint warning">Token 认证已配置但当前输入框为空，表示Token已清空，Token认证将被禁用。</div>}
+        {hasConfiguredAuthToken && !httpAuthToken && (
+          <div className="form-hint warning">
+            已配置 Token。若需修改，请输入新 Token 后保存；若需清空，请点击“清空”。
+          </div>
+        )}
       </div>
 
       {httpApiRunning && (
