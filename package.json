@@ -1,6 +1,8 @@
-{
-  "name": "weflow",
+{ "name": "weflow", "version": "5.0.5",
   "version": "5.0.5",
+=======
+  "version": "5.0.4",
+>>>>>>> origin/main
   "description": "WeFlow",
   "main": "dist-electron/main.js",
   "author": "cc",
