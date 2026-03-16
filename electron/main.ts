@@ -2329,7 +2329,10 @@ function registerIpcHandlers() {
     // 保存配置到 config
     if (port) configService.set('httpApiPort', port)
     if (allowedIp !== undefined) configService.set('httpApiAllowedIp', allowedIp)
-    if (authToken !== undefined) configService.set('httpApiAuthToken', authToken)
+    // 防止保存掩码 "****************"
+    if (authToken !== undefined && authToken !== '****************') {
+      configService.set('httpApiAuthToken', authToken)
+    }
     configService.set('httpApiEnabled', true)
     
     return httpService.start(port || 5031, allowedIp, authToken)
