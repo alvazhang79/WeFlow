@@ -1794,6 +1794,11 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             className="btn btn-secondary"
             onClick={async () => {
               try {
+                // 防止保存掩码 "****************"
+                if (httpAuthToken === '****************') {
+                  showMessage('Token 未修改，无需保存', true)
+                  return
+                }
                 await window.electronAPI.http.setAuthToken(httpAuthToken)
                 setHasConfiguredAuthToken(!!httpAuthToken)
                 showMessage('Token 设置已保存', true)
