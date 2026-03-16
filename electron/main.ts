@@ -2326,11 +2326,18 @@ function registerIpcHandlers() {
 
   // HTTP API 服务
   ipcMain.handle('http:start', async (_, port?: number, allowedIp?: string, authToken?: string) => {
+    // 保存配置到 config
+    if (port) configService.set('httpApiPort', port)
+    if (allowedIp !== undefined) configService.set('httpApiAllowedIp', allowedIp)
+    if (authToken !== undefined) configService.set('httpApiAuthToken', authToken)
+    configService.set('httpApiEnabled', true)
+    
     return httpService.start(port || 5031, allowedIp, authToken)
   })
 
   ipcMain.handle('http:stop', async () => {
     await httpService.stop()
+    configService.set('httpApiEnabled', false)
     return { success: true }
   })
 
@@ -2345,6 +2352,7 @@ function registerIpcHandlers() {
   ipcMain.handle('http:setAllowedIp', async (_, ip: string) => {
     try {
       httpService.setAllowedIp(ip)
+      configService.set('httpApiAllowedIp', ip)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }
@@ -2354,6 +2362,7 @@ function registerIpcHandlers() {
   ipcMain.handle('http:setAuthToken', async (_, token: string) => {
     try {
       httpService.setAuthToken(token)
+      configService.set('httpApiAuthToken', token)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }
@@ -2361,7 +2370,13 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('http:getConfig', async () => {
-    return httpService.getConfig()
+    const serviceConfig = httpService.getConfig()
+    return {
+      ...serviceConfig,
+      allowedIp: configService.get('httpApiAllowedIp') || '127.0.0.1',
+      hasAuthToken: !!configService.get('httpApiAuthToken'),
+      enabled: configService.get('httpApiEnabled') || false
+    }
   })
 
 }
@@ -2545,6 +2560,22 @@ app.whenReady().then(async () => {
   updateSplashProgress(100, '启动完成')
   await new Promise((resolve) => setTimeout(resolve, 250))
   closeSplash()
+
+  // 自动启动 HTTP API 服务（如果上次退出时已启用）
+  try {
+    const httpApiEnabled = configService.get('httpApiEnabled')
+    if (httpApiEnabled) {
+      const savedAllowedIp = configService.get('httpApiAllowedIp') || '127.0.0.1'
+      const savedAuthToken = configService.get('httpApiAuthToken') || ''
+      const savedPort = configService.get('httpApiPort') || 5031
+      
+      console.log('[Startup] Auto-starting HTTP API service...')
+      await httpService.start(savedPort, savedAllowedIp, savedAuthToken)
+      console.log('[Startup] HTTP API service started successfully.')
+    }
+  } catch (e) {
+    console.error('[Startup] Failed to auto-start HTTP API service:', e)
+  }
 
   if (!onboardingDone) {
     createOnboardingWindow()
