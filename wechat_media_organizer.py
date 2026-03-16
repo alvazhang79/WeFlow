@@ -218,6 +218,16 @@ class MessageInfo:
         self.media_file_name = None # 从media_url中解析出的文件名，不含路径
         if self.media_url:
             self.media_file_name = os.path.basename(self.media_url.split('?')[0])
+    
+    def get_date_str(self):
+        """获取消息发生日期字符串，格式 YYYY-MM-DD"""
+        dt = datetime.fromtimestamp(self.create_time / 1000)
+        return dt.strftime("%Y-%m-%d")
+
+    def get_date_day(self):
+        """获取消息发生日期中的日，格式 DD日"""
+        dt = datetime.fromtimestamp(self.create_time / 1000)
+        return dt.strftime("%d日")
 
 # --- 核心逻辑函数 ---
 
@@ -341,9 +351,9 @@ def download_media(media_url: str, save_path: str) -> bool:
 def save_media_and_description(matched_media_results: dict):
     """
     根据匹配结果，将媒体文件和说明保存到指定的目录结构中。
+    按消息实际发生的日期建立目录。
     """
     print(f"正在保存媒体文件和说明到基础目录: {OUTPUT_BASE_DIR}")
-    today_date_hyphenated_str = get_current_date_hyphenated_str()
 
     for media_local_id, match_info in matched_media_results.items():
         media_info = match_info['media_info']
@@ -354,9 +364,11 @@ def save_media_and_description(matched_media_results: dict):
             print(f"警告: 媒体消息 {media_local_id} 缺少下载 URL 或文件名，跳过。")
             continue
 
-        # 构建目录结构
-        # /home/wechat/Alva/6标监理/YYYY-MM-DD/发送人名字/
-        date_dir = os.path.join(OUTPUT_BASE_DIR, today_date_hyphenated_str)
+        # 获取消息实际发生的日期（如 "15日"）
+        date_dir_name = media_info.get_date_day()
+        
+        # 构建目录结构：/home/wechat/Alva/6标监理/15日/发送人名字/
+        date_dir = os.path.join(OUTPUT_BASE_DIR, date_dir_name)
         sender_dir = os.path.join(date_dir, sanitize_filename(sender_display_name))
         os.makedirs(sender_dir, exist_ok=True)
 
@@ -383,8 +395,8 @@ def save_media_and_description(matched_media_results: dict):
         else:
             print(f"媒体文件已存在，跳过下载: {media_save_path}")
 
-        # 生成说明文本文件
-        txt_file_name = f"{today_date_hyphenated_str}-{sanitize_filename(sender_display_name)}.txt"
+        # 生成说明文本文件，使用消息实际日期
+        txt_file_name = f"{date_dir_name}-{sanitize_filename(sender_display_name)}.txt"
         txt_save_path = os.path.join(sender_dir, txt_file_name)
 
         # 将说明内容追加到 txt 文件，确保包含所有媒体的说明
