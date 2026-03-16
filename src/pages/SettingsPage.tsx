@@ -341,8 +341,8 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       // 加载 HTTP API 配置
       const httpApiConfig = await window.electronAPI.http.getConfig()
       setHttpApiAllowedIp(httpApiConfig.allowedIp)
-      // 若已配置 Token，不回填输入框（避免覆盖/误清空）
-      setHttpAuthToken('')
+      // 若已配置 Token，显示掩码提示已保存
+      setHttpAuthToken(httpApiConfig.hasAuthToken ? '********' : '')
       setHasConfiguredAuthToken(httpApiConfig.hasAuthToken)
       setHttpApiPort(httpApiConfig.port)
       setHttpApiRunning(httpApiConfig.running)
@@ -1795,8 +1795,8 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             onClick={async () => {
               try {
                 const trimmed = httpAuthToken.trim()
-                // 防止保存掩码 "****************"
-                if (trimmed === '****************') {
+                // 防止保存掩码
+                if (trimmed === '********' || trimmed === '****************') {
                   showMessage('Token 未修改，无需保存', true)
                   return
                 }
@@ -1807,6 +1807,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
                 }
                 await window.electronAPI.http.setAuthToken(trimmed)
                 setHasConfiguredAuthToken(!!trimmed)
+                setHttpAuthToken('********')
                 showMessage('Token 设置已保存', true)
               } catch (e: any) {
                 showMessage(`保存 Token 失败: ${e}`, false)
@@ -1833,9 +1834,9 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             清空
           </button>
         </div>
-        {hasConfiguredAuthToken && !httpAuthToken && (
+        {hasConfiguredAuthToken && (
           <div className="form-hint warning">
-            已配置 Token。若需修改，请输入新 Token 后保存；若需清空，请点击“清空”。
+            {httpAuthToken ? 'Token 已保存（不显示）。如需修改请输入新 Token 后保存；如需清空请点击“清空”。' : 'Token 已保存（不显示）。如需修改请输入新 Token 后保存；如需清空请点击“清空”。'}
           </div>
         )}
       </div>
