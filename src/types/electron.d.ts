@@ -812,7 +812,8 @@ export interface ElectronAPI {
     stop: () => Promise<{ success: boolean }>
     status: () => Promise<{ running: boolean; port: number; mediaExportPath: string }>
     setAllowedIp: (ip: string) => Promise<{ success: boolean; error?: string }>
-    setAuthToken: (token: string) => Promise<{ success: boolean; error?: string }>
+    setAuthToken: (token: string) => Promise<{ success: boolean; error?: string; message?: string }>
+    getAuthToken: () => Promise<{ success: boolean; token: string }>
     getConfig: () => Promise<{ allowedIp: string; hasAuthToken: boolean; port: number; running: boolean }>
   }
 }

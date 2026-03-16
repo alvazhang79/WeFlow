@@ -395,6 +395,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     status: () => ipcRenderer.invoke('http:status'),
     setAllowedIp: (ip: string) => ipcRenderer.invoke('http:setAllowedIp', ip),
     setAuthToken: (token: string) => ipcRenderer.invoke('http:setAuthToken', token),
+    getAuthToken: () => ipcRenderer.invoke('http:getAuthToken'),
     getConfig: () => ipcRenderer.invoke('http:getConfig')
   }
 })

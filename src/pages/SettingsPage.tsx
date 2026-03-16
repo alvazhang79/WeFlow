@@ -1776,7 +1776,25 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
           />
           <button
             className="btn btn-secondary"
-            onClick={() => setShowAuthToken(!showAuthToken)}
+            onClick={async () => {
+              if (showAuthToken) {
+                setShowAuthToken(false)
+                if (hasConfiguredAuthToken) {
+                  setHttpAuthToken('********')
+                } else {
+                  setHttpAuthToken('')
+                }
+                return
+              }
+              // 显示真实 Token（从主进程获取）
+              try {
+                const res = await window.electronAPI.http.getAuthToken()
+                setHttpAuthToken(res?.token || '')
+              } catch {
+                setHttpAuthToken('')
+              }
+              setShowAuthToken(true)
+            }}
             title={showAuthToken ? '隐藏' : '显示'}
             disabled={httpApiRunning || isTogglingApi}
           >
@@ -1808,6 +1826,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
                 await window.electronAPI.http.setAuthToken(trimmed)
                 setHasConfiguredAuthToken(!!trimmed)
                 setHttpAuthToken('********')
+                setShowAuthToken(false)
                 showMessage('Token 设置已保存', true)
               } catch (e: any) {
                 showMessage(`保存 Token 失败: ${e}`, false)

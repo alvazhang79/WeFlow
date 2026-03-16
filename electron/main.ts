@@ -2364,8 +2364,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('http:setAuthToken', async (_, token: string) => {
     try {
-      // 防止保存掩码 "****************"
-      if (token === '****************') {
+      // 防止保存掩码
+      if (token === '********' || token === '****************') {
         // 如果检测到掩码，清空已保存的 Token
         configService.set('httpApiAuthToken', '')
         httpService.setAuthToken('')
@@ -2377,6 +2377,12 @@ function registerIpcHandlers() {
     } catch (error) {
       return { success: false, error: String(error) }
     }
+  })
+
+  ipcMain.handle('http:getAuthToken', async () => {
+    // 返回已解密的真实 Token
+    const token = configService.get('httpApiAuthToken') || ''
+    return { success: true, token }
   })
 
   ipcMain.handle('http:getConfig', async () => {
