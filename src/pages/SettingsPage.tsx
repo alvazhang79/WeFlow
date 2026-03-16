@@ -161,6 +161,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
   const [httpAuthToken, setHttpAuthToken] = useState('') // 新增：API 认证 Token
   const [showAuthToken, setShowAuthToken] = useState(false) // 新增：控制 Token 显示/隐藏
   const [hasConfiguredAuthToken, setHasConfiguredAuthToken] = useState(false) // 新增：判断是否已配置 Token
+  const [isTokenModified, setIsTokenModified] = useState(false) // 新增：判断 Token 是否被修改
 
   const isClearingCache = isClearingAnalyticsCache || isClearingImageCache || isClearingAllCache
 
@@ -341,9 +342,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       // 加载 HTTP API 配置
       const httpApiConfig = await window.electronAPI.http.getConfig()
       setHttpApiAllowedIp(httpApiConfig.allowedIp)
-      // 如果有 Token，设置标记但不显示掩码，让用户重新输入
+      // 如果有 Token，设置标记，输入框显示为空让用户重新输入
       setHttpAuthToken('')
       setHasConfiguredAuthToken(httpApiConfig.hasAuthToken)
+      setIsTokenModified(false) // 重置修改状态
       setHttpApiPort(httpApiConfig.port)
       setHttpApiRunning(httpApiConfig.running)
 
@@ -1770,8 +1772,11 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             type={showAuthToken ? 'text' : 'password'}
             className="field-input"
             value={httpAuthToken}
-            onChange={(e) => setHttpAuthToken(e.target.value.trim())}
-            placeholder="留空表示不启用 Token 认证"
+            onChange={(e) => {
+              setHttpAuthToken(e.target.value.trim())
+              setIsTokenModified(true) // 标记为已修改
+            }}
+            placeholder={hasConfiguredAuthToken ? "已配置 Token，请输入新值修改" : "留空表示不启用 Token 认证"}
             disabled={httpApiRunning || isTogglingApi}
           />
           <button
@@ -1784,7 +1789,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
           </button>
           <button
             className="btn btn-secondary"
-            onClick={() => setHttpAuthToken(generateRandomToken())}
+            onClick={() => {
+              setHttpAuthToken(generateRandomToken())
+              setIsTokenModified(true)
+            }}
             title="生成随机 Token"
             disabled={httpApiRunning || isTogglingApi}
           >
@@ -1794,13 +1802,14 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             className="btn btn-secondary"
             onClick={async () => {
               try {
-                // 防止保存掩码 "****************"
-                if (httpAuthToken === '****************') {
+                // 如果已配置 Token 但未修改，不执行保存操作
+                if (hasConfiguredAuthToken && !isTokenModified) {
                   showMessage('Token 未修改，无需保存', true)
                   return
                 }
                 await window.electronAPI.http.setAuthToken(httpAuthToken)
                 setHasConfiguredAuthToken(!!httpAuthToken)
+                setIsTokenModified(false) // 保存后重置修改状态
                 showMessage('Token 设置已保存', true)
               } catch (e: any) {
                 showMessage(`保存 Token 失败: ${e}`, false)
@@ -1811,7 +1820,8 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             保存
           </button>
         </div>
-        {hasConfiguredAuthToken && !httpAuthToken && <div className="form-hint warning">Token 认证已配置但当前输入框为空，表示Token已清空，Token认证将被禁用。</div>}
+        {hasConfiguredAuthToken && !httpAuthToken && isTokenModified && <div className="form-hint warning">Token 认证已配置但当前输入框为空，表示Token已清空，Token认证将被禁用。</div>}
+        {hasConfiguredAuthToken && !isTokenModified && <div className="form-hint">Token 认证已配置，如需修改请输入新值。</div>}
       </div>
 
       {httpApiRunning && (

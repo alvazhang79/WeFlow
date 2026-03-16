@@ -2364,13 +2364,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('http:setAuthToken', async (_, token: string) => {
     try {
-      // 防止保存掩码 "****************"
-      if (token === '****************') {
-        // 如果检测到掩码，清空已保存的 Token
-        configService.set('httpApiAuthToken', '')
-        httpService.setAuthToken('')
-        return { success: true, message: 'Token 已清空' }
-      }
+      // 直接保存 Token，不做掩码检测（前端会处理）
       httpService.setAuthToken(token)
       configService.set('httpApiAuthToken', token)
       return { success: true }
