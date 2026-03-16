@@ -2386,8 +2386,10 @@ function registerIpcHandlers() {
     const savedEnabled = configService.get('httpApiEnabled')
     const savedPort = configService.get('httpApiPort')
     
-    // 防止读取到掩码 "****************"
-    if (savedAuthToken === '****************') {
+    // 防止读取到无效的 Token（非加密的明文或掩码）
+    if (!savedAuthToken || savedAuthToken === '****************' || 
+        (!savedAuthToken.startsWith('SAFE_') && !savedAuthToken.startsWith('LOCK_'))) {
+      // 如果不是有效的加密格式，视为无效
       savedAuthToken = ''
     }
     
