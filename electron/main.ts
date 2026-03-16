@@ -2381,8 +2381,9 @@ function registerIpcHandlers() {
     const savedEnabled = configService.get('httpApiEnabled')
     const savedPort = configService.get('httpApiPort')
     
-    // 防止读取到无效的 Token（空字符串或掩码）
-    if (!savedAuthToken || savedAuthToken === '****************') {
+    // 防止读取到无效的 Token（空字符串）
+    // 注意：掩码 '****************' 现在是前端主动设置的合法值，表示已有 Token
+    if (!savedAuthToken) {
       savedAuthToken = ''
     }
     

@@ -342,8 +342,8 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       // 加载 HTTP API 配置
       const httpApiConfig = await window.electronAPI.http.getConfig()
       setHttpApiAllowedIp(httpApiConfig.allowedIp)
-      // 如果有 Token，设置标记，输入框显示为空让用户重新输入
-      setHttpAuthToken('')
+      // 如果有 Token，显示掩码让用户知道已配置；否则显示为空
+      setHttpAuthToken(httpApiConfig.hasAuthToken ? '****************' : '')
       setHasConfiguredAuthToken(httpApiConfig.hasAuthToken)
       setIsTokenModified(false) // 重置修改状态
       setHttpApiPort(httpApiConfig.port)
