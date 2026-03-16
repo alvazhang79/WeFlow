@@ -2366,7 +2366,10 @@ function registerIpcHandlers() {
     try {
       // 防止保存掩码 "****************"
       if (token === '****************') {
-        return { success: true, message: 'Token 未修改' }
+        // 如果检测到掩码，清空已保存的 Token
+        configService.set('httpApiAuthToken', '')
+        httpService.setAuthToken('')
+        return { success: true, message: 'Token 已清空' }
       }
       httpService.setAuthToken(token)
       configService.set('httpApiAuthToken', token)
@@ -2379,9 +2382,14 @@ function registerIpcHandlers() {
   ipcMain.handle('http:getConfig', async () => {
     // 从持久化存储中读取配置，而不是从运行时内存
     const savedAllowedIp = configService.get('httpApiAllowedIp')
-    const savedAuthToken = configService.get('httpApiAuthToken')
+    let savedAuthToken = configService.get('httpApiAuthToken')
     const savedEnabled = configService.get('httpApiEnabled')
     const savedPort = configService.get('httpApiPort')
+    
+    // 防止读取到掩码 "****************"
+    if (savedAuthToken === '****************') {
+      savedAuthToken = ''
+    }
     
     return {
       allowedIp: savedAllowedIp || '127.0.0.1',
