@@ -2370,12 +2370,18 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('http:getConfig', async () => {
-    const serviceConfig = httpService.getConfig()
+    // 从持久化存储中读取配置，而不是从运行时内存
+    const savedAllowedIp = configService.get('httpApiAllowedIp')
+    const savedAuthToken = configService.get('httpApiAuthToken')
+    const savedEnabled = configService.get('httpApiEnabled')
+    const savedPort = configService.get('httpApiPort')
+    
     return {
-      ...serviceConfig,
-      allowedIp: configService.get('httpApiAllowedIp') || '127.0.0.1',
-      hasAuthToken: !!configService.get('httpApiAuthToken'),
-      enabled: configService.get('httpApiEnabled') || false
+      allowedIp: savedAllowedIp || '127.0.0.1',
+      hasAuthToken: !!savedAuthToken,
+      enabled: savedEnabled || false,
+      port: savedPort || 5031,
+      running: httpService.isRunning()
     }
   })
 
