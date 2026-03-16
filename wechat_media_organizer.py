@@ -1,15 +1,30 @@
 import requests
 import os
 import re
+import sys
 from datetime import datetime
 import json
 import time
 
-# --- 配置常量 ---
-API_BASE_URL = "http://192.168.100.68:5031"
-API_TOKEN = "6zDAqWf8V8JQcu1fBBTrLNQBMq04yZEy"
-TARGET_GROUP_NAME = "6标监理"
-OUTPUT_BASE_DIR = "/home/wechat/Alva/6标监理"
+# --- 辅助函数 ---
+def get_current_date_str():
+    return datetime.now().strftime("%Y%m%d")
+
+def get_current_date_hyphenated_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+# --- 配置常量 (支持命令行参数和环境变量) ---
+# 默认配置
+API_BASE_URL = os.environ.get("WEFLOW_API_URL", "http://192.168.100.68:5031")
+API_TOKEN = os.environ.get("WEFLOW_API_TOKEN", "6zDAqWf8V8JQcu1fBBTrLNQBMq04yZEy")
+TARGET_GROUP_NAME = os.environ.get("WEFLOW_GROUP_NAME", "6标监理")
+OUTPUT_BASE_DIR = os.environ.get("WEFLOW_OUTPUT_DIR", "/home/wechat/Alva/6标监理")
+
+# 日期范围：从环境变量读取，格式 YYYYMMDD
+# 如果没有设置，则使用今天的日期
+DEFAULT_START_DATE = os.environ.get("WEFLOW_START_DATE", get_current_date_str())
+DEFAULT_END_DATE = os.environ.get("WEFLOW_END_DATE", get_current_date_str())
+
 MESSAGE_MATCH_WINDOW_SECONDS = 300 # 5分钟
 
 # --- 辅助函数 ---
@@ -68,6 +83,45 @@ def get_group_id(group_name: str) -> str | None:
         print(f"请求 API 失败: {e}")
         return None
 
+def load_contacts_from_json() -> dict[str, str]:
+    """
+    从 JSON 文件加载联系人列表。
+    优先使用用户提供的 JSON 文件。
+    """
+    # 查找最新的 JSON 文件
+    contacts_dir = "/home"
+    json_file = None
+    
+    # 查找匹配的文件
+    for f in os.listdir(contacts_dir):
+        if f.startswith("contacts_") and f.endswith(".json"):
+            if json_file is None or f > json_file:
+                json_file = os.path.join(contacts_dir, f)
+    
+    if not json_file:
+        print("未找到联系人 JSON 文件，将尝试从 API 获取。")
+        return {}
+
+    print(f"正在从 JSON 文件加载联系人: {json_file}")
+    try:
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        contact_map = {}
+        if "contacts" in data:
+            for contact in data["contacts"]:
+                username = contact.get("username")
+                # 优先级：remark > displayName > nickname > username
+                display_name = contact.get("remark") or contact.get("displayName") or contact.get("nickname") or username
+                if username and display_name:
+                    contact_map[username] = display_name
+        
+        print(f"成功从 JSON 文件加载 {len(contact_map)} 个联系人。")
+        return contact_map
+    except Exception as e:
+        print(f"加载 JSON 文件失败: {e}，将尝试从 API 获取。")
+        return {}
+
 def get_all_contacts() -> dict[str, str]:
     """
     通过 API 获取所有联系人列表，并返回 username 到 displayName 的映射。
@@ -101,16 +155,23 @@ def get_all_contacts() -> dict[str, str]:
 
 def get_today_messages(group_id: str) -> list[dict] | None:
     """
-    获取指定群组今天的所有消息，包括图片和视频。
+    获取指定群组在指定日期范围内的所有消息，包括图片和视频。
+    默认获取今天的消息，可通过环境变量 WEFLOW_START_DATE 和 WEFLOW_END_DATE 自定义。
     """
-    print(f"正在获取群 '{group_id}' 今天的所有消息...")
-    today_date_str = get_current_date_str()
+    start_date = DEFAULT_START_DATE
+    end_date = DEFAULT_END_DATE
+    
+    if start_date and end_date:
+        print(f"正在获取群 '{group_id}' 从 {start_date} 到 {end_date} 的消息...")
+    else:
+        print(f"正在获取群 '{group_id}' 今天的所有消息...")
+        
     url = f"{API_BASE_URL}/api/v1/messages"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     params = {
         "talker": group_id,
-        "start": today_date_str,
-        "end": today_date_str,
+        "start": start_date,
+        "end": end_date,
         "media": 1,  # 确保媒体文件被导出
         "image": 1,  # 确保图片被导出
         "video": 1,  # 确保视频被导出
@@ -346,8 +407,15 @@ def main():
         print("无法获取目标微信群 ID，程序退出。")
         return
 
-    # 2. 获取所有联系人的 displayName 映射，用于美化文件名
-    contact_display_name_map = get_all_contacts()
+    # 2. 优先从 JSON 文件获取联系人显示名称映射，用于美化文件名
+    contact_display_name_map = load_contacts_from_json()
+    
+    # 如果 JSON 文件加载失败，回退到 API 获取
+    if not contact_display_name_map:
+        print("JSON 文件加载失败或为空，尝试从 API 获取联系人...")
+        api_contacts = get_all_contacts()
+        if api_contacts:
+            contact_display_name_map = api_contacts
 
     # 3. 获取今天的群消息
     raw_messages = get_today_messages(group_id)
