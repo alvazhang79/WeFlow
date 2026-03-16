@@ -51,10 +51,15 @@ interface ConfigSchema {
   notificationFilterMode: 'all' | 'whitelist' | 'blacklist'
   notificationFilterList: string[]
   wordCloudExcludeWords: string[]
+
+  // HTTP API 相关
+  httpApiAllowedIp: string
+  httpApiAuthToken: string
+  httpApiEnabled: boolean
 }
 
 // 需要 safeStorage 加密的字段（普通模式）
-const ENCRYPTED_STRING_KEYS: Set<string> = new Set(['decryptKey', 'imageAesKey', 'authPassword'])
+const ENCRYPTED_STRING_KEYS: Set<string> = new Set(['decryptKey', 'imageAesKey', 'authPassword', 'httpApiAuthToken'])
 const ENCRYPTED_BOOL_KEYS: Set<string> = new Set(['authEnabled', 'authUseHello'])
 const ENCRYPTED_NUMBER_KEYS: Set<string> = new Set(['imageXorKey'])
 
@@ -116,7 +121,12 @@ export class ConfigService {
         notificationPosition: 'top-right',
         notificationFilterMode: 'all',
         notificationFilterList: [],
-        wordCloudExcludeWords: []
+        wordCloudExcludeWords: [],
+
+        // HTTP API 默认配置
+        httpApiAllowedIp: '127.0.0.1',
+        httpApiAuthToken: '',
+        httpApiEnabled: false,
       }
     })
     this.migrateAuthFields()
